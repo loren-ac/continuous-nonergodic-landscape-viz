@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Continuous Nonergodic Landscape</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./lib/three.module.min.js",
+      "three/addons/controls/OrbitControls.js": "./lib/OrbitControls.js",
+      "three/addons/controls/TrackballControls.js": "./lib/TrackballControls.js"
+    }
+  }
+  </script>
+</head>
+<body>
+
+  <!-- Top Toolbar -->
+  <div id="toolbar">
+    <div class="toolbar-section">
+      <select id="process-select">
+        <option value="mess3">Mess3</option>
+      </select>
+      <span class="toolbar-sep"></span>
+      <select id="measure-select">
+        <optgroup label="Analytical">
+          <option value="entropyRate">Emission Entropy</option>
+          <option value="emissionKL">Emission KL</option>
+          <option value="emissionFisher">Emission Fisher</option>
+          <option value="fisherRao">Fisher-Rao Distance</option>
+        </optgroup>
+        <optgroup label="Monte Carlo">
+          <option value="optimalLoss">Optimal Loss</option>
+          <option value="entropyRateEstimate">Entropy Rate (&#x0125;&#x03BC;)</option>
+          <option value="processKLRate">Process KL Rate</option>
+          <option value="processFisherRate">Process Fisher Rate</option>
+        </optgroup>
+      </select>
+    </div>
+
+    <div class="toolbar-section" id="measure-params" style="display:none">
+      <button id="measure-run" class="text-toggle" style="display:none">&#9654;</button>
+    </div>
+
+    <div class="toolbar-section" id="colormap-group">
+      <button class="seg-btn active" data-colormap="viridis">viridis</button>
+      <button class="seg-btn" data-colormap="inferno">inferno</button>
+      <button class="seg-btn" data-colormap="plasma">plasma</button>
+      <button class="seg-btn" data-colormap="turbo">turbo</button>
+      <button class="seg-btn" data-colormap="coolwarm">coolwarm</button>
+      <button class="seg-btn" data-colormap="grayscale">gray</button>
+    </div>
+
+    <div class="toolbar-section">
+      <div class="param-cell" id="param-resolution" data-min="50" data-max="400" data-step="10" data-value="200">
+        <span class="param-label">Res</span>
+        <span class="param-value">200</span>
+      </div>
+      <div class="param-cell" id="param-pointsize" data-min="0.5" data-max="6.0" data-step="0.5" data-value="2.0">
+        <span class="param-label">Pt</span>
+        <span class="param-value">2.0</span>
+      </div>
+      <button class="text-toggle" id="height-toggle">Height</button>
+      <button class="text-toggle" id="var-toggle" style="display:none">Var</button>
+      <div class="param-cell" id="param-heightscale" data-min="0.1" data-max="3.0" data-step="0.1" data-value="1.0" style="display:none">
+        <span class="param-label">H.Scl</span>
+        <span class="param-value">1.0</span>
+      </div>
+    </div>
+
+    <div class="toolbar-section toolbar-end">
+      <button id="theme-toggle" class="text-toggle" title="Toggle theme">&#9681;</button>
+    </div>
+  </div>
+
+  <!-- Progress Bar -->
+  <div id="progress-bar" style="display:none">
+    <div id="progress-fill"></div>
+  </div>
+
+  <!-- Canvas -->
+  <div id="canvas-container"></div>
+
+  <!-- Bottom Status Bar -->
+  <div id="statusbar">
+    <div class="statusbar-section" id="camera-presets">
+      <button class="seg-btn active" data-preset="top">Top</button>
+      <button class="seg-btn" data-preset="landscape">Landscape</button>
+      <button class="seg-btn" data-preset="low">Low</button>
+    </div>
+
+    <div class="statusbar-section" id="hover-info">
+      <span class="info-pair"><span class="info-label">x</span> <span class="info-value" id="hover-x">&mdash;</span></span>
+      <span class="info-pair"><span class="info-label">&alpha;</span> <span class="info-value" id="hover-a">&mdash;</span></span>
+      <span class="info-pair"><span class="info-label" id="hover-measure-label">H</span> <span class="info-value" id="hover-h">&mdash;</span></span>
+    </div>
+
+    <div class="statusbar-section" id="ref-info" style="display:none">
+      <span class="info-pair"><span class="info-label">ref</span> <span class="info-value" id="ref-x">&mdash;</span> <span class="info-value" id="ref-a">&mdash;</span></span>
+      <button class="text-toggle" id="ref-clear" title="Clear reference point">&times;</button>
+    </div>
+
+    <div class="statusbar-section statusbar-end">
+      <span class="info-pair"><span class="info-value" id="hud-points">&mdash;</span> <span class="info-label">pts</span></span>
+      <span class="info-pair"><span class="info-value" id="hud-range">&mdash;</span></span>
+      <span class="info-pair"><span class="info-value" id="hud-compute">&mdash;</span></span>
+    </div>
+  </div>
+
+  <!-- Tooltip (kept simple, shown near cursor) -->
+  <div id="tooltip">
+    <div><span class="label">x </span><span class="value" id="tip-x">&mdash;</span></div>
+    <div><span class="label">&alpha; </span><span class="value" id="tip-a">&mdash;</span></div>
+    <div><span class="label" id="tip-measure-label">H </span><span class="value" id="tip-h">&mdash;</span></div>
+  </div>
+
+  <!-- Reference Prompt Overlay -->
+  <div id="ref-prompt" style="display:none">click to set reference point</div>
+
+  <!-- Axis Labels -->
+  <div class="axis-label" id="label-x">x</div>
+  <div class="axis-label" id="label-a">&alpha;</div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

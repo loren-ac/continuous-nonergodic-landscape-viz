@@ -1,0 +1,653 @@
+/* === Design System === */
+
+:root {
+  --bg: #1a1a1a;
+  --surface: #242424;
+  --surface-raised: #2e2e2e;
+  --border: #3a3a3a;
+  --text: #cccccc;
+  --text-muted: #777777;
+  --accent: #e8a84c;
+  --bar-height: 36px;
+  --font: "Commit Mono", "CommitMono", "Berkeley Mono", "SF Mono", ui-monospace, monospace;
+  --transition: 120ms ease;
+}
+
+[data-theme="light"] {
+  --bg: #b0b0b0;
+  --surface: #a0a0a0;
+  --surface-raised: #969696;
+  --border: #8a8a8a;
+  --text: #111111;
+  --text-muted: #444444;
+  --accent: #c07820;
+}
+
+/* === Reset === */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 12px;
+  line-height: 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* === Canvas === */
+
+#canvas-container {
+  position: fixed;
+  top: var(--bar-height);
+  left: 0;
+  right: 0;
+  bottom: var(--bar-height);
+  z-index: 0;
+  transition: right 200ms ease;
+}
+
+#canvas-container.panel-open {
+  right: 320px;
+}
+
+#canvas-container canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* === Top Toolbar === */
+
+#toolbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--bar-height);
+  z-index: 10;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0;
+}
+
+.toolbar-section {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 10px;
+  height: 100%;
+  border-right: 1px solid var(--border);
+}
+
+.toolbar-section:last-child {
+  border-right: none;
+}
+
+.toolbar-end {
+  margin-left: auto;
+  border-right: none;
+  border-left: 1px solid var(--border);
+}
+
+/* === Bottom Status Bar === */
+
+#statusbar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: var(--bar-height);
+  z-index: 10;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0;
+}
+
+.statusbar-section {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 10px;
+  height: 100%;
+  border-right: 1px solid var(--border);
+}
+
+.statusbar-section:last-child {
+  border-right: none;
+}
+
+.statusbar-end {
+  margin-left: auto;
+  border-right: none;
+  border-left: 1px solid var(--border);
+  gap: 12px;
+}
+
+/* === Selects (flat, minimal) === */
+
+select {
+  background: transparent;
+  color: var(--text);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 2px 4px;
+  font-family: var(--font);
+  font-size: 11px;
+  outline: none;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+select:hover {
+  border-bottom-color: var(--text-muted);
+}
+
+select:focus {
+  border-bottom-color: var(--accent);
+}
+
+/* === Custom Select === */
+
+.custom-select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.custom-select-trigger {
+  cursor: pointer;
+  padding: 2px 4px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font);
+  font-size: 11px;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.custom-select-trigger:hover {
+  border-bottom-color: var(--text-muted);
+}
+
+.custom-select.open .custom-select-trigger {
+  border-bottom-color: var(--accent);
+}
+
+.custom-select-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 2px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  z-index: 100;
+  display: none;
+  min-width: 100%;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.custom-select.open .custom-select-dropdown {
+  display: block;
+}
+
+.custom-select-group {
+  padding: 4px 8px 2px;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.custom-select-option {
+  padding: 4px 8px;
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 11px;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.custom-select-option:hover {
+  background: var(--border);
+}
+
+.custom-select-option.active {
+  color: var(--accent);
+}
+
+/* === Segmented Buttons === */
+
+.seg-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font);
+  font-size: 11px;
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: color var(--transition);
+  white-space: nowrap;
+}
+
+.seg-btn:hover {
+  color: var(--text);
+}
+
+.seg-btn.active {
+  color: var(--accent);
+}
+
+/* === Parameter Cells (drag-to-scrub) === */
+
+.param-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  cursor: ew-resize;
+  user-select: none;
+  border: 1px solid transparent;
+  transition: border-color var(--transition);
+}
+
+.param-cell:hover {
+  border-color: var(--border);
+}
+
+.param-cell:active {
+  border-color: var(--accent);
+}
+
+.param-label {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.param-value {
+  color: var(--text);
+  font-size: 12px;
+  min-width: 28px;
+  text-align: right;
+}
+
+.param-cell.editing .param-value {
+  outline: none;
+  border-bottom: 1px solid var(--accent);
+  color: var(--accent);
+}
+
+/* === Text Toggle === */
+
+.text-toggle {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font);
+  font-size: 11px;
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: color var(--transition);
+}
+
+.text-toggle:hover {
+  color: var(--text);
+}
+
+.text-toggle.active {
+  color: var(--accent);
+}
+
+/* === Info Pairs (status bar) === */
+
+.info-pair {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+}
+
+.info-label {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.info-value {
+  color: var(--text);
+  font-size: 12px;
+}
+
+#hover-x, #hover-a, #detail-x, #detail-a {
+  cursor: default;
+}
+
+#hover-x:hover, #hover-a:hover, #detail-x:hover, #detail-a:hover {
+  border-bottom: 1px solid var(--border);
+}
+
+#hover-info {
+  gap: 12px;
+}
+
+/* === Tooltip === */
+
+#tooltip {
+  position: fixed;
+  z-index: 20;
+  pointer-events: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  opacity: 0;
+  transition: opacity 80ms ease;
+  white-space: nowrap;
+}
+
+#tooltip.visible {
+  opacity: 1;
+}
+
+#tooltip .label {
+  color: var(--text-muted);
+}
+
+#tooltip .value {
+  color: var(--text);
+}
+
+/* === Axis Labels === */
+
+.axis-label {
+  position: fixed;
+  z-index: 5;
+  color: var(--text-muted);
+  font-size: 11px;
+  pointer-events: none;
+}
+
+/* === Progress Bar === */
+
+#progress-bar {
+  position: fixed;
+  top: var(--bar-height);
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 11;
+  background: var(--border);
+}
+
+#progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  transition: width 100ms linear;
+}
+
+/* === Reference Point Clear === */
+
+#ref-clear {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font);
+  font-size: 14px;
+  padding: 2px 6px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+#ref-clear:hover {
+  color: var(--accent);
+}
+
+#ref-info .info-pair {
+  gap: 6px;
+}
+
+/* === Optgroup in Select === */
+
+optgroup {
+  font-family: var(--font);
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: normal;
+}
+
+option {
+  font-family: var(--font);
+  font-size: 11px;
+  color: var(--text);
+  background: var(--surface);
+}
+
+/* === Run / Cancel Button === */
+
+#measure-run {
+  font-size: 12px;
+  padding: 4px 10px;
+  margin-left: 0;
+  border-left: 1px solid var(--border);
+  transition: color var(--transition), background var(--transition);
+}
+
+#measure-run.dirty {
+  color: var(--accent);
+}
+
+#measure-run.running {
+  color: var(--text);
+}
+
+/* === Reference Prompt Overlay === */
+
+#ref-prompt {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--text-muted);
+  font-family: var(--font);
+  font-size: 14px;
+  pointer-events: none;
+  z-index: 5;
+  letter-spacing: 0.02em;
+}
+
+/* === Detail Panel === */
+
+#detail-panel {
+  position: fixed;
+  top: var(--bar-height);
+  right: 0;
+  bottom: var(--bar-height);
+  width: 320px;
+  z-index: 8;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  transform: translateX(100%);
+  transition: transform 200ms ease;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+#detail-panel.open {
+  transform: translateX(0);
+}
+
+#detail-panel.minimized {
+  transform: translateX(100%);
+}
+
+.detail-tab {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 48px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-right: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 10px;
+  z-index: 9;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+}
+
+.detail-tab:hover {
+  color: var(--accent);
+}
+
+.detail-tab.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.detail-coords {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.detail-header-btns {
+  display: flex;
+  gap: 2px;
+}
+
+#detail-minimize,
+#detail-close {
+  font-size: 14px;
+  padding: 2px 6px;
+  line-height: 1;
+}
+
+#detail-minimize:hover,
+#detail-close:hover {
+  color: var(--accent);
+}
+
+.detail-section {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.detail-section-label {
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* === Chart Controls === */
+
+.detail-chart-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* === Chart Lines Dropdown === */
+
+.chart-lines-dropdown {
+  position: relative;
+}
+
+.chart-lines-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 2px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  z-index: 100;
+  min-width: 100px;
+}
+
+.chart-lines-dropdown.open .chart-lines-menu {
+  display: block;
+}
+
+.chart-lines-item {
+  padding: 4px 8px;
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 11px;
+  color: var(--text);
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.chart-lines-item:hover {
+  background: var(--border);
+}
+
+.chart-lines-check {
+  display: inline-block;
+  width: 12px;
+  text-align: center;
+  color: var(--accent);
+  font-size: 10px;
+}
+
+.detail-section canvas {
+  display: block;
+  width: 100%;
+}
+
+.detail-params {
+  display: flex;
+  gap: 2px;
+  padding: 6px 12px;
+  flex-shrink: 0;
+}
+
+/* === Toolbar Separator === */
+
+.toolbar-sep {
+  display: inline-block;
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 4px;
+}
