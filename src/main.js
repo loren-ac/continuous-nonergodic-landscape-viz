@@ -6,7 +6,8 @@ import { LandscapeRenderer } from './render/landscape.js';
 import { initControls, updateMeasureParams, showRefInfo, hideRefInfo, wireRunButton, setRunState, setVarToggleVisible } from './ui/controls.js';
 import * as hud from './ui/hud.js';
 import * as tooltip from './render/tooltip.js';
-import { createPanel, showPanel, hidePanel, isPanelOpen } from './render/detail-panel.js';
+import { createPanel, showPanel, hidePanel, isPanelOpen, showMixturePanel, showInspect, exitInspect, isInspectMode, onExitInspect } from './render/detail-panel.js';
+import * as mixtureState from './state/mixture-state.js';
 
 // State
 let state = { ...defaults };
@@ -14,6 +15,7 @@ let renderer;
 let currentAbort = null;
 let paramsDirty = false;
 let isRunning = false;
+let shiftHeld = false;
 
 const refPrompt = document.getElementById('ref-prompt');
 
@@ -291,6 +293,18 @@ function init() {
   createPanel();
   wireRunButton(onRunClick);
 
+  onExitInspect(() => {
+    renderer.clearSelectedMarker();
+  });
+
+  // Click on empty space (no point hit) — return to mixture from inspect
+  renderer.onClickEmpty = () => {
+    if (isInspectMode()) {
+      exitInspect();
+      renderer.clearSelectedMarker();
+    }
+  };
+
   // Resize renderer when detail panel opens/closes
   container.addEventListener('transitionend', (e) => {
     if (e.propertyName === 'right') {
@@ -352,7 +366,21 @@ function init() {
     },
   });
 
-  // Click on landscape: always open detail panel, also set reference if needed
+  // Keep landscape markers in sync with mixture state changes (e.g. removing from panel)
+  mixtureState.onChange(() => {
+    const comps = mixtureState.getComponents();
+    if (comps.length > 0) {
+      renderer.setComponentMarkers(comps);
+    } else {
+      renderer.clearComponentMarkers();
+    }
+  });
+
+  // Shift key tracking
+  window.addEventListener('keydown', (e) => { if (e.key === 'Shift') shiftHeld = true; });
+  window.addEventListener('keyup', (e) => { if (e.key === 'Shift') shiftHeld = false; });
+
+  // Click on landscape
   renderer.onClick = (idx, x, a, value) => {
     const measure = getMeasure(state.measure);
     const process = getProcess(state.process);
@@ -361,19 +389,82 @@ function init() {
     const nx = (x - p0.min) / (p0.max - p0.min);
     const na = (a - p1.min) / (p1.max - p1.min);
 
-    // Always open detail panel
-    renderer.setSelectedMarker(nx, na);
-    showPanel(state.process, x, a, () => {
-      renderer.clearSelectedMarker();
-    });
+    if (shiftHeld) {
+      // Exit inspect mode if active
+      if (isInspectMode()) {
+        exitInspect();
+        renderer.clearSelectedMarker();
+      }
 
-    // Also set reference if measure needs it
-    if (measure.needsReference) {
-      state.refPoint = { x, a };
-      renderer.setReferenceMarker(nx, na);
-      hideRefPrompt();
-      showRefInfo(x, a);
-      recompute();
+      // Shift+Click: add/remove mixture component
+      const nearIdx = mixtureState.findNear(nx, na);
+      if (nearIdx >= 0) {
+        mixtureState.removeComponent(nearIdx);
+      } else {
+        mixtureState.addComponent(x, a, nx, na);
+      }
+
+      const comps = mixtureState.getComponents();
+      renderer.setComponentMarkers(comps);
+
+      if (mixtureState.isMultiDelta()) {
+        // Show mixture panel
+        renderer.clearSelectedMarker();
+        showMixturePanel(state.process, mixtureState, () => {
+          mixtureState.clearAll();
+          renderer.clearComponentMarkers();
+        });
+      } else if (comps.length === 1) {
+        // Single component — show as normal single-point panel
+        renderer.setSelectedMarker(comps[0].nx, comps[0].na);
+        showPanel(state.process, comps[0].x, comps[0].a, () => {
+          renderer.clearSelectedMarker();
+        });
+      } else {
+        // No components left
+        closeDetailPanel();
+      }
+    } else if (mixtureState.getCount() >= 2) {
+      // Non-destructive inspect: show single point without destroying mixture
+      renderer.setSelectedMarker(nx, na);
+      showInspect(state.process, x, a);
+    } else {
+      // Plain click: single-point detail panel (no mixture active)
+      renderer.setSelectedMarker(nx, na);
+      showPanel(state.process, x, a, () => {
+        renderer.clearSelectedMarker();
+      });
+
+      // Also set reference if measure needs it
+      if (measure.needsReference) {
+        state.refPoint = { x, a };
+        renderer.setReferenceMarker(nx, na);
+        hideRefPrompt();
+        showRefInfo(x, a);
+        recompute();
+      }
+    }
+  };
+
+  // Drag end: reposition markers
+  renderer.onDragEnd = (type, index, x, a, nx, na) => {
+    if (type === 'component') {
+      mixtureState.updatePosition(index, x, a, nx, na);
+      if (isPanelOpen() && mixtureState.isMultiDelta()) {
+        showMixturePanel(state.process, mixtureState, () => {
+          mixtureState.clearAll();
+          renderer.clearComponentMarkers();
+        });
+      }
+    } else if (type === 'selected') {
+      renderer.setSelectedMarker(nx, na);
+      if (isInspectMode()) {
+        showInspect(state.process, x, a);
+      } else {
+        showPanel(state.process, x, a, () => {
+          renderer.clearSelectedMarker();
+        });
+      }
     }
   };
 

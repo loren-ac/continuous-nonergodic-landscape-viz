@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { TrackballControls } from 'three/addons/controls/TrackballControls.js';
 import { mapColors } from './colormaps.js';
 import { presets, animateToPreset } from './camera-presets.js';
+import { componentColorHex } from './component-colors.js';
 import * as tooltip from './tooltip.js';
 
 export class LandscapeRenderer {
@@ -18,10 +19,18 @@ export class LandscapeRenderer {
     this.onClick = null; // callback(index, x, a, value) or null
     this._refMarker = null;
     this._selectedMarker = null;
+    this._componentMarkers = [];
     this._upperSurface = null;
     this._lowerSurface = null;
     this._varianceEnabled = false;
     this.isMuted = false;
+
+    // Drag state
+    this._dragState = null;     // { type, index, startMouse, active }
+    this.onDragEnd = null;      // callback(type, index, x, a, nx, na)
+    this._groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    this._dragIntersect = new THREE.Vector3();
+    this._projVec2 = new THREE.Vector3();
 
     this._initRenderer();
     this._initScene();
@@ -123,6 +132,19 @@ export class LandscapeRenderer {
     this.renderer.domElement.addEventListener('mouseleave', () => this._onMouseLeave());
     this.renderer.domElement.addEventListener('mousedown', (e) => this._onMouseDown(e));
     this.renderer.domElement.addEventListener('mouseup', (e) => this._onMouseUp(e));
+
+    // Intercept pointerdown on the container (parent) in capture phase.
+    // This fires BEFORE TrackballControls' pointerdown handler on the canvas,
+    // so we can stop the event from ever reaching it during Alt+drag.
+    this.container.addEventListener('pointerdown', (e) => {
+      if (e.altKey) {
+        const hit = this._findNearestMarker(e.clientX, e.clientY);
+        if (hit) {
+          e.stopPropagation();
+          this.controls.enabled = false;
+        }
+      }
+    }, true);
   }
 
   _resize() {
@@ -149,6 +171,43 @@ export class LandscapeRenderer {
     this.mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
     this.mouseScreen.x = e.clientX;
     this.mouseScreen.y = e.clientY;
+
+    // Drag handling
+    if (this._dragState && this._clickStart) {
+      const dx = e.clientX - this._dragState.startMouse.x;
+      const dy = e.clientY - this._dragState.startMouse.y;
+      if (!this._dragState.active && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
+        this._dragState.active = true;
+        this.renderer.domElement.style.cursor = 'grabbing';
+        // Bind mouseup on window in case mouse leaves canvas
+        this._windowMouseUp = (ev) => this._onMouseUp(ev);
+        window.addEventListener('mouseup', this._windowMouseUp);
+      }
+      if (this._dragState.active) {
+        // Raycast to Y=0 plane, update marker position
+        const mouse2 = new THREE.Vector2(this.mouse.x, this.mouse.y);
+        this.raycaster.setFromCamera(mouse2, this.camera);
+        if (this.raycaster.ray.intersectPlane(this._groundPlane, this._dragIntersect)) {
+          const nx = Math.max(0, Math.min(1, this._dragIntersect.x));
+          const na = Math.max(0, Math.min(1, this._dragIntersect.z));
+          if (this._dragState.type === 'selected' && this._selectedMarker) {
+            this._selectedMarker.position.set(nx, 0.003, na);
+          } else if (this._dragState.type === 'component') {
+            const marker = this._componentMarkers[this._dragState.index];
+            if (marker) marker.position.set(nx, 0.004, na);
+          }
+        }
+      }
+    }
+
+    // Show grab cursor when Alt is held near a marker
+    if (!this._dragState && e.altKey) {
+      const hit = this._findNearestMarker(e.clientX, e.clientY);
+      this.renderer.domElement.style.cursor = hit ? 'grab' : '';
+    } else if (!this._dragState) {
+      this.renderer.domElement.style.cursor = '';
+    }
+
     this.dirty = true;
   }
 
@@ -156,6 +215,38 @@ export class LandscapeRenderer {
     this.hoveredIndex = -1;
     tooltip.hide();
     this.dirty = true;
+  }
+
+  // Find the nearest marker to a screen position (for drag detection)
+  _findNearestMarker(clientX, clientY) {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const w = rect.width;
+    const h = rect.height;
+    let best = null;
+    let bestDist = 15; // max pixel distance to grab
+
+    const proj = this._projVec2;
+    const checkMarker = (marker, type, index) => {
+      if (!marker) return;
+      proj.copy(marker.position).project(this.camera);
+      if (proj.z > 1) return; // behind camera
+      const sx = (proj.x * 0.5 + 0.5) * w + rect.left;
+      const sy = (-proj.y * 0.5 + 0.5) * h + rect.top;
+      const d = Math.sqrt((sx - clientX) ** 2 + (sy - clientY) ** 2);
+      if (d < bestDist) {
+        bestDist = d;
+        best = { type, index };
+      }
+    };
+
+    // Check component markers first (higher priority, on top)
+    for (let i = 0; i < this._componentMarkers.length; i++) {
+      checkMarker(this._componentMarkers[i], 'component', i);
+    }
+    // Check selected marker
+    checkMarker(this._selectedMarker, 'selected', -1);
+
+    return best;
   }
 
   // Set grid data and rebuild geometry
@@ -285,9 +376,56 @@ export class LandscapeRenderer {
   // Click detection (distinguish from drag)
   _onMouseDown(e) {
     this._clickStart = { x: e.clientX, y: e.clientY, time: performance.now() };
+
+    // Alt+click near a marker → enter drag mode
+    if (e.altKey) {
+      const hit = this._findNearestMarker(e.clientX, e.clientY);
+      if (hit) {
+        this._dragState = {
+          type: hit.type,
+          index: hit.index,
+          startMouse: { x: e.clientX, y: e.clientY },
+          active: false,
+        };
+      }
+    }
   }
 
   _onMouseUp(e) {
+    // Clean up window mouseup listener if set
+    if (this._windowMouseUp) {
+      window.removeEventListener('mouseup', this._windowMouseUp);
+      this._windowMouseUp = null;
+    }
+
+    if (this._dragState && this._dragState.active) {
+      // Drag completed — re-enable controls and fire callback
+      this.controls.enabled = true;
+      this.renderer.domElement.style.cursor = '';
+
+      const mouse2 = new THREE.Vector2(this.mouse.x, this.mouse.y);
+      this.raycaster.setFromCamera(mouse2, this.camera);
+      if (this.raycaster.ray.intersectPlane(this._groundPlane, this._dragIntersect) && this.onDragEnd && this.gridData) {
+        const nx = Math.max(0, Math.min(1, this._dragIntersect.x));
+        const na = Math.max(0, Math.min(1, this._dragIntersect.z));
+        const [p0, p1] = [this.gridData.process.params[0], this.gridData.process.params[1]];
+        const x = p0.min + nx * (p0.max - p0.min);
+        const a = p1.min + na * (p1.max - p1.min);
+        this.onDragEnd(this._dragState.type, this._dragState.index, x, a, nx, na);
+      }
+
+      this._dragState = null;
+      this._clickStart = null;
+      return; // Don't process as click
+    }
+
+    // Alt+click near marker but didn't drag — re-enable controls
+    if (this._dragState) {
+      this.controls.enabled = true;
+    }
+    this._dragState = null;
+
+    // Original click detection
     if (!this._clickStart) return;
     const dx = e.clientX - this._clickStart.x;
     const dy = e.clientY - this._clickStart.y;
@@ -299,7 +437,7 @@ export class LandscapeRenderer {
   }
 
   _performClick(e) {
-    if (!this.points || !this.onClick) return;
+    if (!this.points) return;
     const rect = this.renderer.domElement.getBoundingClientRect();
     const mouse = new THREE.Vector2(
       ((e.clientX - rect.left) / rect.width) * 2 - 1,
@@ -310,7 +448,9 @@ export class LandscapeRenderer {
     if (intersects.length > 0) {
       const idx = intersects[0].index;
       const { params, values } = this.gridData;
-      this.onClick(idx, params[idx * 2], params[idx * 2 + 1], values[idx]);
+      if (this.onClick) this.onClick(idx, params[idx * 2], params[idx * 2 + 1], values[idx]);
+    } else if (this.onClickEmpty) {
+      this.onClickEmpty();
     }
   }
 
@@ -366,6 +506,38 @@ export class LandscapeRenderer {
       this._selectedMarker = null;
       this.dirty = true;
     }
+  }
+
+  // Component markers for multi-delta mixture
+  setComponentMarkers(components) {
+    this.clearComponentMarkers();
+    for (let i = 0; i < components.length; i++) {
+      const c = components[i];
+      const radius = 0.006 + 0.008 * Math.sqrt(c.weight);
+      const geometry = new THREE.CircleGeometry(radius, 24);
+      geometry.rotateX(-Math.PI / 2);
+      const material = new THREE.MeshBasicMaterial({
+        color: componentColorHex(i),
+        side: THREE.DoubleSide,
+        depthTest: false,
+      });
+      const marker = new THREE.Mesh(geometry, material);
+      marker.position.set(c.nx, 0.004, c.na);
+      marker.renderOrder = 997;
+      this.scene.add(marker);
+      this._componentMarkers.push(marker);
+    }
+    this.dirty = true;
+  }
+
+  clearComponentMarkers() {
+    for (const m of this._componentMarkers) {
+      this.scene.remove(m);
+      m.geometry.dispose();
+      m.material.dispose();
+    }
+    this._componentMarkers = [];
+    this.dirty = true;
   }
 
   // Variance surfaces: translucent mesh at mean ± stddev
