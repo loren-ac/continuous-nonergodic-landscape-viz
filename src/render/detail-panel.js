@@ -1,11 +1,12 @@
-// Detail panel: shows per-position loss curve and belief simplex trajectory
-// for a single (x, α) parameterization.
+// Detail panel: tabbed architecture with explore (single-point) and
+// compound (mixture) tabs for loss curve and belief simplex visualization.
 
 import { computeDetailData, estimateEntropyRate } from '../compute/detail-compute.js';
 import { computeMixtureData } from '../compute/mixture-compute.js';
 import { getProcess } from '../processes/registry.js';
 import { initParamCell } from '../ui/controls.js';
 import { componentColor } from './component-colors.js';
+import * as tabState from '../state/tab-state.js';
 
 const LOSS_CANVAS_HEIGHT = 180;
 const SIMPLEX_CANVAS_HEIGHT = 200;
@@ -15,10 +16,16 @@ let lossCanvas = null;
 let lossCtx = null;
 let simplexCanvas = null;
 let simplexCtx = null;
+
+// Render-time state (loaded from active tab by loadActiveTab)
 let currentData = null;
-let currentPoint = null;
-let processName = null;
-let panelParams = { contextLength: 256, batchSize: 64, seed: 42 };
+let mixtureMode = false;
+let mixtureData = null;
+let viewMode = 'mix';
+let componentVisible = [];
+let soloIndex = -1;
+let activeComponents = [];  // components array for drawing functions
+
 let chartToggles = {
   loss: false, optimalLoss: true, hMu: true,
   sigma: false, lbar: false, lbarStar: false, entropyRate: false, logV: true,
@@ -31,30 +38,7 @@ let animFromYMin = 0, animFromYMax = 1;
 const ANIM_DURATION = 350;
 let isOpen = false;
 let isMinimized = false;
-let _onClose = null;
 
-// Mixture mode state
-let mixtureMode = false;
-let mixtureData = null;
-let mixtureStateRef = null;   // reference to mixture-state module
-let viewMode = 'mix';         // 'mix' or 'per'
-
-// Per-component visibility (mixture mode)
-let componentVisible = [];    // boolean[], true = visible
-let soloIndex = -1;           // -1 = no solo
-
-function resetVisibility(count) {
-  componentVisible = new Array(count).fill(true);
-  soloIndex = -1;
-}
-
-// Inspect mode state (transient overlay while mixture preserved)
-let inspectMode = false;
-let inspectPoint = null;      // { x, a }
-let inspectData = null;
-let _onExitInspect = null;
-
-// Resolve CSS variable font for Canvas 2D (can't use var() in ctx.font)
 function getFont(size) {
   const family = getComputedStyle(document.documentElement).getPropertyValue('--font').trim();
   return `${size}px ${family}`;
@@ -69,15 +53,15 @@ export function createPanel() {
   panelEl.id = 'detail-panel';
   panelEl.innerHTML = `
     <div class="detail-header">
-      <button class="text-toggle" id="detail-back-mix" style="display:none">&larr; Mix</button>
-      <span class="detail-coords">
-        <span class="info-label">x</span> <span class="info-value" id="detail-x">&mdash;</span>
-        <span class="info-label">&alpha;</span> <span class="info-value" id="detail-a">&mdash;</span>
-      </span>
+      <div class="tab-bar" id="tab-bar"></div>
       <span class="detail-header-btns">
         <button class="text-toggle" id="detail-minimize">&minus;</button>
         <button class="text-toggle" id="detail-close">&times;</button>
       </span>
+    </div>
+    <div class="detail-coords-bar" id="detail-coords-bar" style="display:none;">
+      <span class="info-label">x</span> <span class="info-value" id="detail-x">&mdash;</span>
+      <span class="info-label">&alpha;</span> <span class="info-value" id="detail-a">&mdash;</span>
     </div>
     <div class="detail-component-list" id="detail-component-list" style="display:none;"></div>
     <div class="detail-section">
@@ -127,7 +111,7 @@ export function createPanel() {
   `;
   document.body.appendChild(panelEl);
 
-  // Tab is a separate body-level element (not inside panel, which clips overflow)
+  // Minimize restore tab (separate body-level element)
   const tabEl = document.createElement('div');
   tabEl.id = 'detail-tab';
   tabEl.className = 'detail-tab';
@@ -139,18 +123,15 @@ export function createPanel() {
   simplexCanvas = document.getElementById('detail-simplex-canvas');
   simplexCtx = simplexCanvas.getContext('2d');
 
+  // Panel-level close: close all tabs
   document.getElementById('detail-close').addEventListener('click', () => {
+    const tabs = tabState.getTabs();
+    for (const t of tabs) tabState.closeTab(t.id);
     hidePanel();
-    if (_onClose) _onClose();
   });
 
   document.getElementById('detail-minimize').addEventListener('click', () => {
     minimizePanel();
-  });
-
-  document.getElementById('detail-back-mix').addEventListener('click', () => {
-    exitInspect();
-    if (_onExitInspect) _onExitInspect();
   });
 
   tabEl.addEventListener('click', () => {
@@ -189,7 +170,7 @@ export function createPanel() {
     }
   });
 
-  // Norm button (axis scaling, separate from line toggles)
+  // Norm button
   const normBtn = document.getElementById('norm-toggle');
   normBtn.addEventListener('click', () => {
     normY = !normY;
@@ -202,48 +183,169 @@ export function createPanel() {
   viewToggle.addEventListener('click', (e) => {
     const btn = e.target.closest('.seg-btn');
     if (!btn) return;
-    viewMode = btn.dataset.view;
+    const newMode = btn.dataset.view;
+    const activeId = tabState.getActiveTabId();
+    if (activeId != null) {
+      tabState.setViewMode(activeId, newMode);
+    }
+    viewMode = newMode;
     viewToggle.querySelectorAll('.seg-btn').forEach(b => b.classList.toggle('active', b.dataset.view === viewMode));
     renderLossChart(true);
     renderSimplexChart();
   });
 
+  // Param cells — wire through tabState
   initParamCell(document.getElementById('detail-ctx'), (v) => {
-    panelParams.contextLength = Math.round(v);
-    recomputeAndRender();
+    tabState.setPanelParam('contextLength', Math.round(v));
   });
   initParamCell(document.getElementById('detail-batch'), (v) => {
-    panelParams.batchSize = Math.round(v);
-    recomputeAndRender();
+    tabState.setPanelParam('batchSize', Math.round(v));
   });
   initParamCell(document.getElementById('detail-seed'), (v) => {
-    panelParams.seed = Math.round(v);
-    recomputeAndRender();
+    tabState.setPanelParam('seed', Math.round(v));
+  });
+
+  // Listen for tab state changes
+  tabState.onChange(({ reason }) => {
+    if (reason === 'tab-switch' || reason === 'tab-created' || reason === 'tab-closed') {
+      loadActiveTab();
+    } else if (reason === 'data-change') {
+      const tab = tabState.getActiveTab();
+      if (tab?.type === 'compound') {
+        activeComponents = tab.components;
+        componentVisible = [...tab.componentVisible];
+        soloIndex = tab.soloIndex;
+        renderComponentList(tab);
+      }
+      recomputeActiveTab();
+      renderTabBar();
+    } else if (reason === 'param-change') {
+      recomputeActiveTab();
+    } else if (reason === 'visibility-change') {
+      const tab = tabState.getActiveTab();
+      if (tab && tab.type === 'compound') {
+        viewMode = tab.viewMode;
+        componentVisible = [...tab.componentVisible];
+        soloIndex = tab.soloIndex;
+        const viewToggleEl = document.getElementById('detail-view-toggle');
+        viewToggleEl.querySelectorAll('.seg-btn').forEach(b => b.classList.toggle('active', b.dataset.view === viewMode));
+        renderComponentList(tab);
+      }
+      renderLossChart(true);
+      renderSimplexChart();
+    }
   });
 }
 
-export function showPanel(pName, x, a, onClose) {
-  processName = pName;
-  currentPoint = { x, a };
-  _onClose = onClose;
+// --- Tab Bar ---
 
-  // Exit mixture and inspect mode
-  mixtureMode = false;
-  mixtureData = null;
-  mixtureStateRef = null;
-  inspectMode = false;
-  inspectPoint = null;
-  inspectData = null;
-  document.getElementById('detail-component-list').style.display = 'none';
-  document.getElementById('detail-view-toggle').style.display = 'none';
-  document.getElementById('detail-back-mix').style.display = 'none';
-  document.querySelector('.detail-coords').style.display = '';
+function renderTabBar() {
+  const bar = document.getElementById('tab-bar');
+  const tabs = tabState.getTabs();
+  const activeId = tabState.getActiveTabId();
+  bar.innerHTML = '';
 
-  document.getElementById('detail-x').textContent = x.toFixed(4);
-  document.getElementById('detail-a').textContent = a.toFixed(4);
+  for (const tab of tabs) {
+    const el = document.createElement('div');
+    el.className = 'tab-item' + (tab.id === activeId ? ' active' : '');
+    el.dataset.tabId = tab.id;
 
-  recomputeAndRender();
+    const label = document.createElement('span');
+    label.className = 'tab-label';
+    if (tab.type === 'explore') {
+      label.textContent = `${tab.point.x.toFixed(2)}, ${tab.point.a.toFixed(2)}`;
+    } else {
+      label.textContent = `Mix (${tab.components.length})`;
+    }
 
+    const close = document.createElement('button');
+    close.className = 'tab-close';
+    close.innerHTML = '&times;';
+    close.addEventListener('click', (e) => {
+      e.stopPropagation();
+      tabState.closeTab(tab.id);
+    });
+
+    el.addEventListener('click', () => {
+      tabState.activateTab(tab.id);
+    });
+
+    el.appendChild(label);
+    el.appendChild(close);
+    bar.appendChild(el);
+  }
+}
+
+// --- Load Active Tab ---
+
+function loadActiveTab() {
+  const tab = tabState.getActiveTab();
+
+  if (!tab) {
+    hidePanel();
+    return;
+  }
+
+  if (tab.type === 'explore') {
+    mixtureMode = false;
+    mixtureData = null;
+    viewMode = 'mix';
+    componentVisible = [];
+    soloIndex = -1;
+    activeComponents = [];
+
+    document.getElementById('detail-coords-bar').style.display = '';
+    document.getElementById('detail-x').textContent = tab.point.x.toFixed(4);
+    document.getElementById('detail-a').textContent = tab.point.a.toFixed(4);
+    document.getElementById('detail-component-list').style.display = 'none';
+    document.getElementById('detail-view-toggle').style.display = 'none';
+
+    const cached = tabState.getCachedData(tab.id);
+    if (cached) {
+      currentData = cached;
+      renderTabBar();
+      renderLossChart(true);
+      renderSimplexChart();
+    } else {
+      renderTabBar();
+      recomputeActiveTab();
+    }
+
+  } else if (tab.type === 'compound') {
+    mixtureMode = true;
+    viewMode = tab.viewMode;
+    componentVisible = [...tab.componentVisible];
+    soloIndex = tab.soloIndex;
+    activeComponents = tab.components;
+
+    document.getElementById('detail-coords-bar').style.display = 'none';
+    document.getElementById('detail-component-list').style.display = '';
+    document.getElementById('detail-view-toggle').style.display = '';
+
+    const viewToggleEl = document.getElementById('detail-view-toggle');
+    viewToggleEl.querySelectorAll('.seg-btn').forEach(
+      b => b.classList.toggle('active', b.dataset.view === viewMode)
+    );
+
+    renderComponentList(tab);
+
+    const cached = tabState.getCachedData(tab.id);
+    if (cached) {
+      mixtureData = cached.mixtureData;
+      currentData = cached.currentData;
+      renderTabBar();
+      renderLossChart(true);
+      renderSimplexChart();
+    } else {
+      renderTabBar();
+      recomputeActiveTab();
+    }
+  }
+
+  ensurePanelOpen();
+}
+
+function ensurePanelOpen() {
   if (isMinimized) {
     restorePanel();
   } else if (!isOpen) {
@@ -253,110 +355,67 @@ export function showPanel(pName, x, a, onClose) {
   }
 }
 
-export function showMixturePanel(pName, mixState, onClose) {
-  processName = pName;
-  mixtureMode = true;
-  mixtureStateRef = mixState;
-  _onClose = onClose;
-  currentPoint = null;
-  inspectMode = false;
-  inspectPoint = null;
-  inspectData = null;
+// --- Recompute ---
 
-  resetVisibility(mixState.getComponents().length);
+function recomputeActiveTab() {
+  const tab = tabState.getActiveTab();
+  if (!tab) return;
+  const pName = tabState.getProcessName();
+  if (!pName) return;
+  const params = tabState.getPanelParams();
 
-  // Hide single coords, show component list and view toggle
-  document.querySelector('.detail-coords').style.display = 'none';
-  document.getElementById('detail-component-list').style.display = '';
-  document.getElementById('detail-view-toggle').style.display = '';
-  const backBtn = document.getElementById('detail-back-mix');
-  if (backBtn) backBtn.style.display = 'none';
+  if (tab.type === 'explore') {
+    const process = getProcess(pName);
+    currentData = computeDetailData(
+      process, tab.point.x, tab.point.a,
+      params.contextLength, params.batchSize, params.seed,
+    );
+    currentData.hMu = estimateEntropyRate(process, tab.point.x, tab.point.a);
+    mixtureData = null;
+    tabState.setCachedData(tab.id, currentData);
 
-  renderComponentList();
-  recomputeAndRender();
-
-  if (isMinimized) {
-    restorePanel();
-  } else if (!isOpen) {
-    panelEl.classList.add('open');
-    document.getElementById('canvas-container').classList.add('panel-open');
-    isOpen = true;
+  } else if (tab.type === 'compound') {
+    activeComponents = tab.components;
+    if (tab.components.length >= 2) {
+      mixtureData = computeMixtureData(
+        pName, tab.components,
+        params.contextLength, params.batchSize, params.seed,
+      );
+      currentData = {
+        avgLosses: mixtureData.mixtureAvgLosses,
+        stdLosses: mixtureData.mixtureStdLosses,
+        optimalLosses: mixtureData.mixtureOptimalLosses,
+        stdOptimalLosses: mixtureData.mixtureStdOptimal,
+        entropyRate: mixtureData.compositeEntropyRate,
+        hMu: mixtureData.compositeHMu,
+        randomGuessing: mixtureData.randomGuessing,
+        beliefs: mixtureData.perComponent[0].beliefs,
+      };
+    } else if (tab.components.length === 1) {
+      const c = tab.components[0];
+      const process = getProcess(pName);
+      currentData = computeDetailData(
+        process, c.x, c.a,
+        params.contextLength, params.batchSize, params.seed,
+      );
+      currentData.hMu = estimateEntropyRate(process, c.x, c.a);
+      mixtureData = null;
+    } else {
+      return;
+    }
+    tabState.setCachedData(tab.id, { mixtureData, currentData });
   }
-}
 
-export function showInspect(pName, x, a) {
-  inspectMode = true;
-  inspectPoint = { x, a };
-  processName = pName;
-
-  // Compute single-point data for the inspected point
-  const process = getProcess(pName);
-  inspectData = computeDetailData(
-    process, x, a,
-    panelParams.contextLength, panelParams.batchSize, panelParams.seed,
-  );
-  inspectData.hMu = estimateEntropyRate(process, x, a);
-
-  // Set currentData to inspect data so chart functions render it
-  currentData = inspectData;
-
-  // Show coords header with back button, hide component list
-  document.querySelector('.detail-coords').style.display = '';
-  document.getElementById('detail-x').textContent = x.toFixed(4);
-  document.getElementById('detail-a').textContent = a.toFixed(4);
-  document.getElementById('detail-component-list').style.display = 'none';
-  document.getElementById('detail-view-toggle').style.display = 'none';
-  document.getElementById('detail-back-mix').style.display = '';
-
-  // Render as single-point (temporarily suppress mixtureMode for drawing)
-  const holdMixtureMode = mixtureMode;
-  mixtureMode = false;
   renderLossChart(true);
   renderSimplexChart();
-  mixtureMode = holdMixtureMode;
-
-  // Ensure panel is open
-  if (isMinimized) {
-    restorePanel();
-  } else if (!isOpen) {
-    panelEl.classList.add('open');
-    document.getElementById('canvas-container').classList.add('panel-open');
-    isOpen = true;
-  }
 }
 
-export function exitInspect() {
-  if (!inspectMode) return;
-  inspectMode = false;
-  inspectPoint = null;
-  inspectData = null;
+// --- Component List (compound tabs) ---
 
-  document.getElementById('detail-back-mix').style.display = 'none';
-
-  // Restore mixture view
-  document.querySelector('.detail-coords').style.display = 'none';
-  document.getElementById('detail-component-list').style.display = '';
-  document.getElementById('detail-view-toggle').style.display = '';
-
-  renderComponentList();
-  recomputeAndRender();
-}
-
-export function isInspectMode() {
-  return inspectMode;
-}
-
-export function onExitInspect(cb) {
-  _onExitInspect = cb;
-}
-
-function renderComponentList() {
+function renderComponentList(tab) {
   const listEl = document.getElementById('detail-component-list');
-  const comps = mixtureStateRef.getComponents();
+  const comps = tab.components;
   listEl.innerHTML = '';
-
-  // Sync visibility array with component count
-  if (componentVisible.length !== comps.length) resetVisibility(comps.length);
 
   for (let i = 0; i < comps.length; i++) {
     const c = comps[i];
@@ -367,7 +426,6 @@ function renderComponentList() {
     dot.className = 'component-dot';
     const color = componentColor(i);
 
-    // Visual: filled = visible, hollow ring = hidden
     if (componentVisible[i]) {
       dot.style.background = color;
       dot.style.border = 'none';
@@ -381,28 +439,15 @@ function renderComponentList() {
     dot.addEventListener('click', (e) => {
       e.stopPropagation();
       if (dotClickTimer) {
-        // Double-click
         clearTimeout(dotClickTimer);
         dotClickTimer = null;
-        if (soloIndex === i) {
-          soloIndex = -1;
-          componentVisible.fill(true);
-        } else {
-          soloIndex = i;
-          componentVisible.fill(false);
-          componentVisible[i] = true;
-        }
-        renderComponentList();
-        renderLossChart(true);
-        renderSimplexChart();
+        // Double-click: solo/unsolo
+        tabState.setSoloComponent(tab.id, soloIndex === i ? -1 : i);
       } else {
         dotClickTimer = setTimeout(() => {
           dotClickTimer = null;
-          componentVisible[i] = !componentVisible[i];
-          if (soloIndex >= 0) soloIndex = -1;
-          renderComponentList();
-          renderLossChart(true);
-          renderSimplexChart();
+          // Single click: toggle visibility
+          tabState.setComponentVisible(tab.id, i, !componentVisible[i]);
         }, 250);
       }
     });
@@ -423,23 +468,7 @@ function renderComponentList() {
     remove.className = 'component-remove';
     remove.textContent = '\u00d7';
     remove.addEventListener('click', () => {
-      mixtureStateRef.removeComponent(i);
-      componentVisible.splice(i, 1);
-      if (soloIndex === i) soloIndex = -1;
-      else if (soloIndex > i) soloIndex--;
-      const remaining = mixtureStateRef.getComponents();
-      if (remaining.length < 2) {
-        // Fall back to single-point or close
-        if (remaining.length === 1) {
-          showPanel(processName, remaining[0].x, remaining[0].a, _onClose);
-        } else {
-          hidePanel();
-          if (_onClose) _onClose();
-        }
-        return;
-      }
-      renderComponentList();
-      recomputeAndRender();
+      tabState.removeComponent(tab.id, i);
     });
 
     row.appendChild(dot);
@@ -448,14 +477,13 @@ function renderComponentList() {
     row.appendChild(remove);
     listEl.appendChild(row);
 
-    // Wire weight scrubbing
     initParamCell(weightCell, (v) => {
-      mixtureStateRef.updateWeight(i, v);
-      renderComponentList();
-      recomputeAndRender();
+      tabState.updateWeight(tab.id, i, v);
     });
   }
 }
+
+// --- Panel visibility ---
 
 export function hidePanel() {
   if (!isOpen && !isMinimized) return;
@@ -464,15 +492,9 @@ export function hidePanel() {
   document.getElementById('detail-tab').classList.remove('visible');
   isOpen = false;
   isMinimized = false;
-  currentPoint = null;
   currentData = null;
   mixtureMode = false;
   mixtureData = null;
-  mixtureStateRef = null;
-  inspectMode = false;
-  inspectPoint = null;
-  inspectData = null;
-  document.getElementById('detail-back-mix').style.display = 'none';
 }
 
 function minimizePanel() {
@@ -499,61 +521,6 @@ export function isPanelOpen() {
   return isOpen || isMinimized;
 }
 
-function recomputeAndRender() {
-  // Inspect mode: recompute single-point data without touching mixture state
-  if (inspectMode && inspectPoint && processName) {
-    const process = getProcess(processName);
-    inspectData = computeDetailData(
-      process, inspectPoint.x, inspectPoint.a,
-      panelParams.contextLength, panelParams.batchSize, panelParams.seed,
-    );
-    inspectData.hMu = estimateEntropyRate(process, inspectPoint.x, inspectPoint.a);
-    currentData = inspectData;
-    const holdMixtureMode = mixtureMode;
-    mixtureMode = false;
-    renderLossChart();
-    renderSimplexChart();
-    mixtureMode = holdMixtureMode;
-    return;
-  }
-
-  if (mixtureMode && mixtureStateRef) {
-    const comps = mixtureStateRef.getComponents();
-    if (comps.length < 2) return;
-    mixtureData = computeMixtureData(
-      processName, comps,
-      panelParams.contextLength, panelParams.batchSize, panelParams.seed,
-    );
-    // Also set currentData to the mixture-averaged data for chart functions
-    currentData = {
-      avgLosses: mixtureData.mixtureAvgLosses,
-      stdLosses: mixtureData.mixtureStdLosses,
-      optimalLosses: mixtureData.mixtureOptimalLosses,
-      stdOptimalLosses: mixtureData.mixtureStdOptimal,
-      entropyRate: mixtureData.compositeEntropyRate,
-      hMu: mixtureData.compositeHMu,
-      randomGuessing: mixtureData.randomGuessing,
-      beliefs: mixtureData.perComponent[0].beliefs, // placeholder for simplex
-    };
-    renderLossChart();
-    renderSimplexChart();
-  } else if (currentPoint && processName) {
-    const process = getProcess(processName);
-    mixtureData = null;
-    currentData = computeDetailData(
-      process,
-      currentPoint.x,
-      currentPoint.a,
-      panelParams.contextLength,
-      panelParams.batchSize,
-      panelParams.seed,
-    );
-    currentData.hMu = estimateEntropyRate(process, currentPoint.x, currentPoint.a);
-    renderLossChart();
-    renderSimplexChart();
-  }
-}
-
 // --- Loss Chart (Canvas 2D) ---
 
 function computeTargetYRange() {
@@ -564,7 +531,6 @@ function computeTargetYRange() {
   if (normY) {
     let bottom;
     if (mixtureMode && viewMode === 'per' && mixtureData) {
-      // Use lowest ĥ_μ from visible components
       bottom = Infinity;
       for (let j = 0; j < mixtureData.perComponent.length; j++) {
         if (!componentVisible[j]) continue;
@@ -586,7 +552,6 @@ function computeTargetYRange() {
     yMin = 0;
     yMax = 0;
 
-    // Skip mixture-averaged data when in Per mode (only show per-component)
     const skipMixture = mixtureMode && viewMode === 'per';
 
     if (chartToggles.logV) yMax = Math.max(yMax, randomGuessing);
@@ -625,7 +590,6 @@ function computeTargetYRange() {
       yMax = Math.max(yMax, avg / ctxLen);
     }
 
-    // In Per mode, also consider per-component data
     if (mixtureMode && mixtureData && viewMode === 'per') {
       for (let j = 0; j < mixtureData.perComponent.length; j++) {
         if (!componentVisible[j]) continue;
@@ -757,10 +721,9 @@ function drawLossChart(yMin, yMax) {
     ctx.setLineDash([]);
   }
 
-  // Skip mixture-averaged curves when in Per mode
   const skipMixtureCurves = mixtureMode && viewMode === 'per';
 
-  // Dashed line: emission entropy H(O|S) (lower bound on entropy rate)
+  // Dashed line: emission entropy H(O|S)
   if (chartToggles.entropyRate && !skipMixtureCurves) {
     ctx.setLineDash([4, 4]);
     ctx.strokeStyle = accent;
@@ -868,7 +831,7 @@ function drawLossChart(yMin, yMax) {
     }
   }
 
-  // Solid line: per-position optimal loss L*(t) (Rao-Blackwellized)
+  // Solid line: per-position optimal loss L*(t)
   if (chartToggles.optimalLoss && optimalLosses && !skipMixtureCurves) {
     ctx.strokeStyle = accent;
     ctx.lineWidth = 1;
@@ -894,14 +857,12 @@ function drawLossChart(yMin, yMax) {
 
   // Per-component overlay (mixture Per mode)
   if (mixtureMode && mixtureData && viewMode === 'per') {
-    const comps = mixtureStateRef.getComponents();
     for (let i = 0; i < mixtureData.perComponent.length; i++) {
       if (!componentVisible[i]) continue;
       const pc = mixtureData.perComponent[i];
       const color = componentColor(i);
-      const alpha = Math.max(0.3, comps[i].weight);
+      const alpha = Math.max(0.3, activeComponents[i] ? activeComponents[i].weight : 0.5);
 
-      // Per-component L*(t)
       if (chartToggles.optimalLoss && pc.optimalLosses) {
         ctx.strokeStyle = color;
         ctx.globalAlpha = alpha;
@@ -914,7 +875,6 @@ function drawLossChart(yMin, yMax) {
         ctx.stroke();
       }
 
-      // Per-component L(t)
       if (chartToggles.loss) {
         ctx.strokeStyle = color;
         ctx.globalAlpha = alpha * 0.6;
@@ -929,7 +889,6 @@ function drawLossChart(yMin, yMax) {
         ctx.setLineDash([]);
       }
 
-      // Per-component ĥ_μ
       if (chartToggles.hMu && pc.hMu != null) {
         ctx.setLineDash([4, 4]);
         ctx.strokeStyle = color;
@@ -967,19 +926,16 @@ function renderSimplexChart() {
 
   ctx.clearRect(0, 0, cssW, cssH);
 
-  // Equilateral triangle geometry
   const pad = 24;
   const triSide = Math.min(cssW - pad * 2, (cssH - pad * 2) / (Math.sqrt(3) / 2));
   const cx = cssW / 2;
   const triH = triSide * Math.sqrt(3) / 2;
   const cy = pad + triH / 2;
 
-  // Vertices: v0=top (s0), v1=bottom-left (s1), v2=bottom-right (s2)
   const v0 = { x: cx, y: cy - triH / 2 };
   const v1 = { x: cx - triSide / 2, y: cy + triH / 2 };
   const v2 = { x: cx + triSide / 2, y: cy + triH / 2 };
 
-  // Draw triangle outline
   ctx.strokeStyle = border;
   ctx.lineWidth = 1;
   ctx.beginPath();
@@ -989,7 +945,6 @@ function renderSimplexChart() {
   ctx.closePath();
   ctx.stroke();
 
-  // Vertex labels
   ctx.font = getFont(10);
   ctx.fillStyle = textMuted;
   ctx.textAlign = 'center';
@@ -1009,16 +964,15 @@ function renderSimplexChart() {
   }
 
   const S = 3;
-  const ctxLen = panelParams.contextLength;
+  const params = tabState.getPanelParams();
+  const ctxLen = params.contextLength;
 
   if (mixtureMode && mixtureData) {
-    // Per-component belief trajectories in component colors
-    const comps = mixtureStateRef.getComponents();
     for (let i = 0; i < mixtureData.perComponent.length; i++) {
       if (!componentVisible[i]) continue;
       const pc = mixtureData.perComponent[i];
       ctx.fillStyle = componentColor(i);
-      ctx.globalAlpha = Math.max(0.3, comps[i].weight);
+      ctx.globalAlpha = Math.max(0.3, activeComponents[i] ? activeComponents[i].weight : 0.5);
       for (let b = 0; b < pc.beliefs.length; b++) {
         const traj = pc.beliefs[b];
         for (let t = 0; t < ctxLen; t++) {

@@ -6,8 +6,8 @@ import { LandscapeRenderer } from './render/landscape.js';
 import { initControls, updateMeasureParams, showRefInfo, hideRefInfo, wireRunButton, setRunState, setVarToggleVisible } from './ui/controls.js';
 import * as hud from './ui/hud.js';
 import * as tooltip from './render/tooltip.js';
-import { createPanel, showPanel, hidePanel, isPanelOpen, showMixturePanel, showInspect, exitInspect, isInspectMode, onExitInspect } from './render/detail-panel.js';
-import * as mixtureState from './state/mixture-state.js';
+import { createPanel, hidePanel, isPanelOpen } from './render/detail-panel.js';
+import * as tabState from './state/tab-state.js';
 
 // State
 let state = { ...defaults };
@@ -16,6 +16,7 @@ let currentAbort = null;
 let paramsDirty = false;
 let isRunning = false;
 let shiftHeld = false;
+let metaHeld = false;
 
 const refPrompt = document.getElementById('ref-prompt');
 
@@ -80,10 +81,7 @@ function selectPointByCoords(x, a) {
   const nx = (gx - p0.min) / (p0.max - p0.min);
   const na = (ga - p1.min) / (p1.max - p1.min);
 
-  renderer.setSelectedMarker(nx, na);
-  showPanel(state.process, gx, ga, () => {
-    renderer.clearSelectedMarker();
-  });
+  tabState.createExploreTab({ x: gx, a: ga, nx, na });
 
   const measure = getMeasure(state.measure);
   if (measure.needsReference) {
@@ -292,18 +290,10 @@ function init() {
 
   createPanel();
   wireRunButton(onRunClick);
+  tabState.setProcessName(state.process);
 
-  onExitInspect(() => {
-    renderer.clearSelectedMarker();
-  });
-
-  // Click on empty space (no point hit) — return to mixture from inspect
-  renderer.onClickEmpty = () => {
-    if (isInspectMode()) {
-      exitInspect();
-      renderer.clearSelectedMarker();
-    }
-  };
+  // Click on empty space — no-op for now
+  renderer.onClickEmpty = () => {};
 
   // Resize renderer when detail panel opens/closes
   container.addEventListener('transitionend', (e) => {
@@ -366,76 +356,62 @@ function init() {
     },
   });
 
-  // Keep landscape markers in sync with mixture state changes (e.g. removing from panel)
-  mixtureState.onChange(() => {
-    const comps = mixtureState.getComponents();
-    if (comps.length > 0) {
-      renderer.setComponentMarkers(comps);
-    } else {
-      renderer.clearComponentMarkers();
+  // Keep landscape markers in sync with tab state
+  tabState.onChange(() => {
+    // Skip marker sync during active drag (avoids flicker)
+    if (renderer._dragState && renderer._dragState.active) return;
+    renderer.clearSelectedMarker();
+    renderer.clearComponentMarkers();
+    const active = tabState.getActiveTab();
+    if (!active) return;
+    if (active.type === 'explore') {
+      renderer.setSelectedMarker(active.point.nx, active.point.na);
+    } else if (active.type === 'compound' && active.components.length > 0) {
+      renderer.setComponentMarkers(active.components);
     }
   });
 
-  // Shift key tracking
-  window.addEventListener('keydown', (e) => { if (e.key === 'Shift') shiftHeld = true; });
-  window.addEventListener('keyup', (e) => { if (e.key === 'Shift') shiftHeld = false; });
+  // Key tracking
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Shift') shiftHeld = true;
+    if (e.key === 'Meta') metaHeld = true;
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.key === 'Shift') shiftHeld = false;
+    if (e.key === 'Meta') metaHeld = false;
+  });
 
   // Click on landscape
   renderer.onClick = (idx, x, a, value) => {
-    const measure = getMeasure(state.measure);
     const process = getProcess(state.process);
     const p0 = process.params[0];
     const p1 = process.params[1];
     const nx = (x - p0.min) / (p0.max - p0.min);
     const na = (a - p1.min) / (p1.max - p1.min);
+    const point = { x, a, nx, na };
 
-    if (shiftHeld) {
-      // Exit inspect mode if active
-      if (isInspectMode()) {
-        exitInspect();
-        renderer.clearSelectedMarker();
-      }
-
-      // Shift+Click: add/remove mixture component
-      const nearIdx = mixtureState.findNear(nx, na);
-      if (nearIdx >= 0) {
-        mixtureState.removeComponent(nearIdx);
+    if (metaHeld) {
+      // Cmd+Click: new compound tab
+      tabState.createCompoundTab(point);
+    } else if (shiftHeld) {
+      // Shift+Click: add/remove from active compound (or create one)
+      const active = tabState.getActiveTab();
+      if (active && active.type === 'compound') {
+        const near = tabState.findNearComponent(active.id, nx, na);
+        if (near >= 0) {
+          tabState.removeComponent(active.id, near);
+        } else {
+          tabState.addComponent(active.id, point);
+        }
       } else {
-        mixtureState.addComponent(x, a, nx, na);
+        tabState.createCompoundTab(point);
       }
-
-      const comps = mixtureState.getComponents();
-      renderer.setComponentMarkers(comps);
-
-      if (mixtureState.isMultiDelta()) {
-        // Show mixture panel
-        renderer.clearSelectedMarker();
-        showMixturePanel(state.process, mixtureState, () => {
-          mixtureState.clearAll();
-          renderer.clearComponentMarkers();
-        });
-      } else if (comps.length === 1) {
-        // Single component — show as normal single-point panel
-        renderer.setSelectedMarker(comps[0].nx, comps[0].na);
-        showPanel(state.process, comps[0].x, comps[0].a, () => {
-          renderer.clearSelectedMarker();
-        });
-      } else {
-        // No components left
-        closeDetailPanel();
-      }
-    } else if (mixtureState.getCount() >= 2) {
-      // Non-destructive inspect: show single point without destroying mixture
-      renderer.setSelectedMarker(nx, na);
-      showInspect(state.process, x, a);
     } else {
-      // Plain click: single-point detail panel (no mixture active)
-      renderer.setSelectedMarker(nx, na);
-      showPanel(state.process, x, a, () => {
-        renderer.clearSelectedMarker();
-      });
+      // Regular click: explore tab
+      tabState.createExploreTab(point);
 
       // Also set reference if measure needs it
+      const measure = getMeasure(state.measure);
       if (measure.needsReference) {
         state.refPoint = { x, a };
         renderer.setReferenceMarker(nx, na);
@@ -446,25 +422,25 @@ function init() {
     }
   };
 
+  // Drag move: update tab state in real-time during drag
+  renderer.onDragMove = (type, index, x, a, nx, na) => {
+    const point = { x, a, nx, na };
+    const active = tabState.getActiveTab();
+    if (type === 'component' && active?.type === 'compound') {
+      tabState.updateComponentPosition(active.id, index, point);
+    } else if (type === 'selected' && active?.type === 'explore') {
+      tabState.updateExplorePoint(point);
+    }
+  };
+
   // Drag end: reposition markers
   renderer.onDragEnd = (type, index, x, a, nx, na) => {
-    if (type === 'component') {
-      mixtureState.updatePosition(index, x, a, nx, na);
-      if (isPanelOpen() && mixtureState.isMultiDelta()) {
-        showMixturePanel(state.process, mixtureState, () => {
-          mixtureState.clearAll();
-          renderer.clearComponentMarkers();
-        });
-      }
-    } else if (type === 'selected') {
-      renderer.setSelectedMarker(nx, na);
-      if (isInspectMode()) {
-        showInspect(state.process, x, a);
-      } else {
-        showPanel(state.process, x, a, () => {
-          renderer.clearSelectedMarker();
-        });
-      }
+    const point = { x, a, nx, na };
+    const active = tabState.getActiveTab();
+    if (type === 'component' && active?.type === 'compound') {
+      tabState.updateComponentPosition(active.id, index, point);
+    } else if (type === 'selected' && active?.type === 'explore') {
+      tabState.updateExplorePoint(point);
     }
   };
 

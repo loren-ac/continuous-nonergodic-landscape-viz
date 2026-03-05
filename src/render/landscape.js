@@ -28,6 +28,7 @@ export class LandscapeRenderer {
     // Drag state
     this._dragState = null;     // { type, index, startMouse, active }
     this.onDragEnd = null;      // callback(type, index, x, a, nx, na)
+    this.onDragMove = null;     // callback(type, index, x, a, nx, na) — fired during drag
     this._groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     this._dragIntersect = new THREE.Vector3();
     this._projVec2 = new THREE.Vector3();
@@ -195,6 +196,13 @@ export class LandscapeRenderer {
           } else if (this._dragState.type === 'component') {
             const marker = this._componentMarkers[this._dragState.index];
             if (marker) marker.position.set(nx, 0.004, na);
+          }
+          // Fire onDragMove with real parameter values
+          if (this.onDragMove && this.gridData) {
+            const [p0, p1] = [this.gridData.process.params[0], this.gridData.process.params[1]];
+            const x = p0.min + nx * (p0.max - p0.min);
+            const a = p1.min + na * (p1.max - p1.min);
+            this.onDragMove(this._dragState.type, this._dragState.index, x, a, nx, na);
           }
         }
       }

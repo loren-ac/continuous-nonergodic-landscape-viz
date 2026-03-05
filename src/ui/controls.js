@@ -187,6 +187,35 @@ export function initControls(callbacks) {
   refClearBtn.addEventListener('click', () => {
     onReferenceClear();
   });
+
+  // Help dropdown
+  const helpDropdown = document.getElementById('help-dropdown');
+  const helpTrigger = document.getElementById('help-trigger');
+  const helpMenu = document.getElementById('help-menu');
+
+  helpMenu.innerHTML = `
+    <div class="help-row"><span class="help-key">Click</span><span class="help-desc">Explore point</span></div>
+    <div class="help-row"><span class="help-key">Shift + Click</span><span class="help-desc">Add/remove mix component</span></div>
+    <div class="help-row"><span class="help-key">Cmd + Click</span><span class="help-desc">New mix tab</span></div>
+    <div class="help-divider"></div>
+    <div class="help-row"><span class="help-key">Option + Drag</span><span class="help-desc">Move marker</span></div>
+    <div class="help-row"><span class="help-key">Double-click value</span><span class="help-desc">Type exact coordinate</span></div>
+  `;
+
+  helpTrigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    helpDropdown.classList.toggle('open');
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!helpDropdown.contains(e.target)) {
+      helpDropdown.classList.remove('open');
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') helpDropdown.classList.remove('open');
+  });
 }
 
 // Update measure-specific parameter cells dynamically
