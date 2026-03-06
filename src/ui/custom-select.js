@@ -7,6 +7,8 @@ export class CustomSelect {
     this._native = nativeSelect;
     this._onChange = onChange;
     this._isOpen = false;
+    this._tooltips = {};
+    this._tooltipTimer = null;
 
     this._build();
     this._bindEvents();
@@ -32,6 +34,11 @@ export class CustomSelect {
     this._dropdown.className = 'custom-select-dropdown';
     this._buildOptions();
     this._el.appendChild(this._dropdown);
+
+    // Tooltip element (appended to body to avoid clipping)
+    this._tooltipEl = document.createElement('div');
+    this._tooltipEl.className = 'select-tooltip';
+    document.body.appendChild(this._tooltipEl);
   }
 
   _selectedText() {
@@ -66,6 +73,26 @@ export class CustomSelect {
     el.textContent = opt.textContent;
     el.dataset.value = opt.value;
     this._dropdown.appendChild(el);
+
+    // Tooltip on hover
+    el.addEventListener('mouseenter', () => {
+      const tip = this._tooltips[opt.value];
+      if (!tip) return;
+      this._tooltipTimer = setTimeout(() => {
+        this._tooltipEl.textContent = tip;
+        const dropRect = this._dropdown.getBoundingClientRect();
+        const optRect = el.getBoundingClientRect();
+        this._tooltipEl.style.top = optRect.top + 'px';
+        this._tooltipEl.style.left = (dropRect.right + 4) + 'px';
+        this._tooltipEl.style.right = '';
+        this._tooltipEl.classList.add('visible');
+      }, 400);
+    });
+
+    el.addEventListener('mouseleave', () => {
+      clearTimeout(this._tooltipTimer);
+      this._tooltipEl.classList.remove('visible');
+    });
   }
 
   _bindEvents() {
@@ -109,6 +136,8 @@ export class CustomSelect {
   _close() {
     this._isOpen = false;
     this._el.classList.remove('open');
+    clearTimeout(this._tooltipTimer);
+    this._tooltipEl.classList.remove('visible');
   }
 
   _select(value) {
@@ -122,6 +151,11 @@ export class CustomSelect {
     });
 
     if (this._onChange) this._onChange(value);
+  }
+
+  // Set tooltip text for each option value
+  setTooltips(map) {
+    this._tooltips = map;
   }
 
   // Programmatic value update (if needed externally)

@@ -22,6 +22,7 @@ measures.set('entropyRate', {
   label: 'Emission Entropy',
   shortLabel: 'H(O|S)',
   unit: 'nats',
+  tooltip: 'H(O|S) = \u2212\u2211\u209b \u03C0(s) \u2211\u2092 P(o|s) log P(o|s)\nWeighted average emission entropy across hidden states.',
   isExpensive: false,
   needsReference: false,
   extraParams: [],
@@ -35,6 +36,7 @@ measures.set('emissionKL', {
   label: 'Emission KL',
   shortLabel: 'eKL',
   unit: 'nats',
+  tooltip: 'D_KL = \u2211\u209b \u03C0(s) \u2211\u2092 P_ref(o|s) log[P_ref(o|s) / P(o|s)]\nKL divergence of emission distributions from reference.',
   isExpensive: false,
   needsReference: true,
   extraParams: [],
@@ -68,6 +70,7 @@ measures.set('emissionFisher', {
   label: 'Emission Fisher',
   shortLabel: 'eFI',
   unit: '',
+  tooltip: 'Tr(F) = F\u2080\u2080 + F\u2081\u2081\nF\u1D62\u2C7C = \u2211\u209b \u03C0(s) \u2211\u2092 (1/P) \u00B7 (\u2202P/\u2202\u03B8\u1D62)(\u2202P/\u2202\u03B8\u2C7C)\nTrace of emission Fisher information w.r.t. (x, \u03B1).',
   isExpensive: false,
   needsReference: false,
   extraParams: [],
@@ -122,6 +125,7 @@ measures.set('fisherRao', {
   label: 'Fisher-Rao Distance',
   shortLabel: 'FR',
   unit: '',
+  tooltip: 'd_FR = \u222B\u2080\u00B9 \u221A(\u0394\u03B8\u1D40 F(\u03B3(t)) \u0394\u03B8) dt\nGeodesic distance from reference under emission Fisher metric.',
   isExpensive: false,
   needsReference: true,
   extraParams: [],
@@ -163,6 +167,7 @@ measures.set('optimalLoss', {
   label: 'Optimal Loss',
   shortLabel: 'L*',
   unit: 'nats',
+  tooltip: 'L* = \uD835\uDD3C[ (1/T) \u2211\u209C \u2212log P(o\u209C | belief\u209C) ]\nAverage per-token loss under Bayes-optimal prediction.',
   isExpensive: true,
   needsReference: false,
   extraParams: [
@@ -178,6 +183,7 @@ measures.set('entropyRateEstimate', {
   label: 'Entropy Rate (\u0125\u03BC)',
   shortLabel: '\u0125\u03BC',
   unit: 'nats',
+  tooltip: '\u0125\u03BC = (1/T\u2032) \u2211_{t>0.8T} H(P(o\u209C | belief\u209C))\nTail-averaged predictive entropy (last 20% of context).',
   isExpensive: true,
   needsReference: false,
   extraParams: [
@@ -193,6 +199,7 @@ measures.set('processKLRate', {
   label: 'Process KL Rate',
   shortLabel: 'pKL',
   unit: 'nats',
+  tooltip: 'D_KL = \uD835\uDD3C_{seq\u223Cref}[ CE(target | seq) ] \u2212 H(ref)\nExcess nats/token when target predicts reference sequences.',
   isExpensive: true,
   needsReference: true,
   extraParams: [
@@ -208,6 +215,7 @@ measures.set('processFisherRate', {
   label: 'Process Fisher Rate',
   shortLabel: 'pFI',
   unit: '',
+  tooltip: '(1/T) Tr(F_process)\nProcess-level Fisher information via score function\nfinite differences.',
   isExpensive: true,
   needsReference: false,
   extraParams: [
@@ -224,6 +232,14 @@ export function getMeasure(name) {
   const m = measures.get(name);
   if (!m) throw new Error(`Unknown measure: ${name}`);
   return m;
+}
+
+export function getMeasureTooltips() {
+  const map = {};
+  for (const [name, m] of measures) {
+    if (m.tooltip) map[name] = m.tooltip;
+  }
+  return map;
 }
 
 export function listMeasures() {

@@ -1,4 +1,5 @@
 import { CustomSelect } from './custom-select.js';
+import { getMeasureTooltips } from '../compute/measures.js';
 
 // Drag-to-scrub parameter cell
 export function initParamCell(el, onChange) {
@@ -110,10 +111,11 @@ export function initControls(callbacks) {
   } = callbacks;
 
   // Measure select (custom dropdown)
-  new CustomSelect(
+  const measureSelect = new CustomSelect(
     document.getElementById('measure-select'),
     (value) => onMeasureChange(value),
   );
+  measureSelect.setTooltips(getMeasureTooltips());
 
   // Process select (custom dropdown)
   new CustomSelect(

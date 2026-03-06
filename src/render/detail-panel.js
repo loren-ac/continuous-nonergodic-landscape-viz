@@ -14,8 +14,10 @@ const SIMPLEX_CANVAS_HEIGHT = 200;
 let panelEl = null;
 let lossCanvas = null;
 let lossCtx = null;
-let simplexCanvas = null;
-let simplexCtx = null;
+
+let geometryToggles = { belief: true, obs: false, logObs: false };
+let logObsAngle = 0;
+let logObsDragState = null;
 
 // Render-time state (loaded from active tab by loadActiveTab)
 let currentData = null;
@@ -90,9 +92,16 @@ export function createPanel() {
       </div>
       <canvas id="detail-loss-canvas"></canvas>
     </div>
-    <div class="detail-section">
-      <div class="detail-section-label">Belief Simplex</div>
-      <canvas id="detail-simplex-canvas"></canvas>
+    <div class="detail-section" id="geometry-section">
+      <div class="detail-section-label">
+        Geometry
+        <span class="detail-chart-controls" id="geometry-toggles">
+          <button class="seg-btn active" data-geo="belief">Belief</button>
+          <button class="seg-btn" data-geo="obs">Obs</button>
+          <button class="seg-btn" data-geo="logObs">Log</button>
+        </span>
+      </div>
+      <div class="geometry-container" id="geometry-container"></div>
     </div>
     <div class="detail-section detail-params">
       <div class="param-cell" id="detail-ctx" data-min="16" data-max="512" data-step="16" data-value="256">
@@ -120,8 +129,7 @@ export function createPanel() {
 
   lossCanvas = document.getElementById('detail-loss-canvas');
   lossCtx = lossCanvas.getContext('2d');
-  simplexCanvas = document.getElementById('detail-simplex-canvas');
-  simplexCtx = simplexCanvas.getContext('2d');
+  rebuildGeometryCanvases();
 
   // Panel-level close: close all tabs
   document.getElementById('detail-close').addEventListener('click', () => {
@@ -191,7 +199,23 @@ export function createPanel() {
     viewMode = newMode;
     viewToggle.querySelectorAll('.seg-btn').forEach(b => b.classList.toggle('active', b.dataset.view === viewMode));
     renderLossChart(true);
-    renderSimplexChart();
+    renderAllGeometry();
+  });
+
+  // Geometry toggles (multi-select)
+  const geoToggles = document.getElementById('geometry-toggles');
+  geoToggles.addEventListener('click', (e) => {
+    const btn = e.target.closest('.seg-btn[data-geo]');
+    if (!btn) return;
+    const key = btn.dataset.geo;
+    geometryToggles[key] = !geometryToggles[key];
+    // Ensure at least one is active
+    if (!geometryToggles.belief && !geometryToggles.obs && !geometryToggles.logObs) {
+      geometryToggles[key] = true;
+    }
+    btn.classList.toggle('active', geometryToggles[key]);
+    rebuildGeometryCanvases();
+    renderAllGeometry();
   });
 
   // Param cells — wire through tabState
@@ -232,7 +256,7 @@ export function createPanel() {
         renderComponentList(tab);
       }
       renderLossChart(true);
-      renderSimplexChart();
+      renderAllGeometry();
     }
   });
 }
@@ -305,7 +329,7 @@ function loadActiveTab() {
       currentData = cached;
       renderTabBar();
       renderLossChart(true);
-      renderSimplexChart();
+      renderAllGeometry();
     } else {
       renderTabBar();
       recomputeActiveTab();
@@ -335,7 +359,7 @@ function loadActiveTab() {
       currentData = cached.currentData;
       renderTabBar();
       renderLossChart(true);
-      renderSimplexChart();
+      renderAllGeometry();
     } else {
       renderTabBar();
       recomputeActiveTab();
@@ -407,7 +431,7 @@ function recomputeActiveTab() {
   }
 
   renderLossChart(true);
-  renderSimplexChart();
+  renderAllGeometry();
 }
 
 // --- Component List (compound tabs) ---
@@ -907,23 +931,92 @@ function drawLossChart(yMin, yMax) {
   }
 }
 
-// --- Belief Simplex (Canvas 2D) ---
+// --- Geometry Canvases ---
 
-function renderSimplexChart() {
-  const dpr = window.devicePixelRatio || 1;
-  const cssW = simplexCanvas.parentElement.clientWidth - 24;
+function rebuildGeometryCanvases() {
+  const container = document.getElementById('geometry-container');
+  if (!container) return;
+  container.innerHTML = '';
+
+  // Top row: simplex canvases (belief and/or obs)
+  const simplexKeys = [];
+  if (geometryToggles.belief) simplexKeys.push('belief');
+  if (geometryToggles.obs) simplexKeys.push('obs');
+
+  if (simplexKeys.length > 0) {
+    const row = document.createElement('div');
+    row.className = 'geometry-row';
+    for (const key of simplexKeys) {
+      const canvas = document.createElement('canvas');
+      canvas.id = `geo-canvas-${key}`;
+      canvas.className = 'geometry-canvas';
+      row.appendChild(canvas);
+    }
+    container.appendChild(row);
+  }
+
+  // Bottom row: logObs full width
+  if (geometryToggles.logObs) {
+    const canvas = document.createElement('canvas');
+    canvas.id = 'geo-canvas-logObs';
+    canvas.className = 'geometry-canvas geometry-canvas-full';
+    container.appendChild(canvas);
+    wireLogObsDrag(canvas);
+  }
+}
+
+function renderAllGeometry() {
+  if (!currentData) return;
+  rebuildGeometryCanvases();
+
+  const section = document.getElementById('geometry-section');
+  if (!section) return;
+  const totalW = section.clientWidth - 24;
+  const simplexCount = (geometryToggles.belief ? 1 : 0) + (geometryToggles.obs ? 1 : 0);
+  const simplexW = simplexCount > 1 ? Math.floor((totalW - 2) / simplexCount) : totalW;
+
+  if (geometryToggles.belief) {
+    const canvas = document.getElementById('geo-canvas-belief');
+    if (canvas) renderSimplexOnCanvas(canvas, 'beliefs', ['s\u2080', 's\u2081', 's\u2082'], simplexW);
+  }
+  if (geometryToggles.obs) {
+    const canvas = document.getElementById('geo-canvas-obs');
+    if (canvas) renderSimplexOnCanvas(canvas, 'predictions', ['o\u2080', 'o\u2081', 'o\u2082'], simplexW);
+  }
+  if (geometryToggles.logObs) {
+    const canvas = document.getElementById('geo-canvas-logObs');
+    if (canvas) renderLogObs3D(canvas, totalW);
+  }
+}
+
+function renderLogObs3DOnly() {
+  const canvas = document.getElementById('geo-canvas-logObs');
+  if (!canvas || !currentData) return;
+  const section = document.getElementById('geometry-section');
+  if (!section) return;
+  const totalW = section.clientWidth - 24;
+  renderLogObs3D(canvas, totalW);
+}
+
+function setupCanvas(canvas, cssW) {
   const cssH = SIMPLEX_CANVAS_HEIGHT;
-  simplexCanvas.width = cssW * dpr;
-  simplexCanvas.height = cssH * dpr;
-  simplexCanvas.style.width = cssW + 'px';
-  simplexCanvas.style.height = cssH + 'px';
-  const ctx = simplexCtx;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = cssW * dpr;
+  canvas.height = cssH * dpr;
+  canvas.style.width = cssW + 'px';
+  canvas.style.height = cssH + 'px';
+  const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, cssW, cssH };
+}
 
+// --- Simplex Renderer (belief or observation probability) ---
+
+function renderSimplexOnCanvas(canvas, dataKey, labels, cssW) {
+  const { ctx, cssH } = setupCanvas(canvas, cssW);
   const textMuted = getCSSVar('--text-muted');
   const accent = getCSSVar('--accent');
   const border = getCSSVar('--border');
-
   ctx.clearRect(0, 0, cssW, cssH);
 
   const pad = 24;
@@ -949,12 +1042,12 @@ function renderSimplexChart() {
   ctx.fillStyle = textMuted;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
-  ctx.fillText('s\u2080', v0.x, v0.y - 4);
+  ctx.fillText(labels[0], v0.x, v0.y - 4);
   ctx.textBaseline = 'top';
   ctx.textAlign = 'right';
-  ctx.fillText('s\u2081', v1.x - 4, v1.y + 2);
+  ctx.fillText(labels[1], v1.x - 4, v1.y + 2);
   ctx.textAlign = 'left';
-  ctx.fillText('s\u2082', v2.x + 4, v2.y + 2);
+  ctx.fillText(labels[2], v2.x + 4, v2.y + 2);
 
   function baryToPixel(p0, p1, p2) {
     return {
@@ -963,7 +1056,6 @@ function renderSimplexChart() {
     };
   }
 
-  const S = 3;
   const params = tabState.getPanelParams();
   const ctxLen = params.contextLength;
 
@@ -971,12 +1063,15 @@ function renderSimplexChart() {
     for (let i = 0; i < mixtureData.perComponent.length; i++) {
       if (!componentVisible[i]) continue;
       const pc = mixtureData.perComponent[i];
+      const trajectories = pc[dataKey];
+      if (!trajectories || trajectories.length === 0) continue;
+      const dim = trajectories[0].length / ctxLen;
       ctx.fillStyle = componentColor(i);
       ctx.globalAlpha = Math.max(0.3, activeComponents[i] ? activeComponents[i].weight : 0.5);
-      for (let b = 0; b < pc.beliefs.length; b++) {
-        const traj = pc.beliefs[b];
+      for (let b = 0; b < trajectories.length; b++) {
+        const traj = trajectories[b];
         for (let t = 0; t < ctxLen; t++) {
-          const pt = baryToPixel(traj[t * S], traj[t * S + 1], traj[t * S + 2]);
+          const pt = baryToPixel(traj[t * dim], traj[t * dim + 1], traj[t * dim + 2]);
           ctx.beginPath();
           ctx.arc(pt.x, pt.y, 0.75, 0, Math.PI * 2);
           ctx.fill();
@@ -985,14 +1080,239 @@ function renderSimplexChart() {
     }
     ctx.globalAlpha = 1;
   } else {
-    const { beliefs } = currentData;
+    const trajectories = currentData[dataKey];
+    if (!trajectories || trajectories.length === 0) return;
+    const dim = trajectories[0].length / ctxLen;
     ctx.fillStyle = accent;
-    for (let b = 0; b < beliefs.length; b++) {
-      const traj = beliefs[b];
+    for (let b = 0; b < trajectories.length; b++) {
+      const traj = trajectories[b];
       for (let t = 0; t < ctxLen; t++) {
-        const pt = baryToPixel(traj[t * S], traj[t * S + 1], traj[t * S + 2]);
+        const pt = baryToPixel(traj[t * dim], traj[t * dim + 1], traj[t * dim + 2]);
         ctx.beginPath();
         ctx.arc(pt.x, pt.y, 0.75, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+}
+
+// --- 3D Log Observation Probability (rotatable) ---
+
+function logObsProject(lp0, lp1, lp2, cx, cy, cz) {
+  // Rodrigues' rotation around k = (1,-2,1)/√6 through centroid (cx,cy,cz)
+  const d0 = lp0 - cx, d1 = lp1 - cy, d2 = lp2 - cz;
+  const ca = Math.cos(logObsAngle), sa = Math.sin(logObsAngle);
+  const s6 = 1 / Math.sqrt(6);
+  const k0 = -2 * s6, k1 = s6, k2 = s6;
+  const crx = k1 * d2 - k2 * d1;
+  const cry = k2 * d0 - k0 * d2;
+  const crz = k0 * d1 - k1 * d0;
+  const kd = k0 * d0 + k1 * d1 + k2 * d2;
+  const r0 = (d0 * ca + crx * sa + k0 * kd * (1 - ca)) + cx;
+  const r1 = (d1 * ca + cry * sa + k1 * kd * (1 - ca)) + cy;
+  const r2 = (d2 * ca + crz * sa + k2 * kd * (1 - ca)) + cz;
+  // Fixed isometric projection
+  const cos30 = Math.cos(Math.PI / 6);
+  const sin30 = Math.sin(Math.PI / 6);
+  return {
+    x: (r1 - r2) * cos30,
+    y: -r0 + (r1 + r2) * sin30,
+  };
+}
+
+function wireLogObsDrag(canvas) {
+  const onMove = (e) => {
+    if (!logObsDragState) return;
+    const dx = e.clientX - logObsDragState.startX;
+    const sensitivity = Math.PI / 150;
+    logObsAngle = logObsDragState.startAngle + dx * sensitivity;
+    renderLogObs3DOnly();
+  };
+
+  const onUp = () => {
+    if (!logObsDragState) return;
+    logObsDragState = null;
+    canvas.classList.remove('dragging');
+    window.removeEventListener('mousemove', onMove);
+    window.removeEventListener('mouseup', onUp);
+  };
+
+  canvas.addEventListener('mousedown', (e) => {
+    logObsDragState = { startX: e.clientX, startAngle: logObsAngle };
+    canvas.classList.add('dragging');
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    e.preventDefault();
+  });
+
+  canvas.addEventListener('dblclick', () => {
+    logObsAngle = 0;
+    renderLogObs3DOnly();
+  });
+}
+
+function renderLogObs3D(canvas, cssW) {
+  const { ctx, cssH } = setupCanvas(canvas, cssW);
+  const textMuted = getCSSVar('--text-muted');
+  const accent = getCSSVar('--accent');
+  const border = getCSSVar('--border');
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  const params = tabState.getPanelParams();
+  const ctxLen = params.contextLength;
+
+  // First pass: compute 3D centroid in log-space
+  let sumLp0 = 0, sumLp1 = 0, sumLp2 = 0, ptCount = 0;
+
+  function addToCentroid(trajectories) {
+    if (!trajectories || trajectories.length === 0) return;
+    const dim = trajectories[0].length / ctxLen;
+    for (let b = 0; b < trajectories.length; b++) {
+      const traj = trajectories[b];
+      for (let t = 0; t < ctxLen; t++) {
+        sumLp0 += Math.log(Math.max(traj[t * dim], 1e-15));
+        sumLp1 += Math.log(Math.max(traj[t * dim + 1], 1e-15));
+        sumLp2 += Math.log(Math.max(traj[t * dim + 2], 1e-15));
+        ptCount++;
+      }
+    }
+  }
+
+  if (mixtureMode && mixtureData) {
+    for (let i = 0; i < mixtureData.perComponent.length; i++) {
+      if (!componentVisible[i]) continue;
+      addToCentroid(mixtureData.perComponent[i].predictions);
+    }
+  } else {
+    addToCentroid(currentData.predictions);
+  }
+
+  if (ptCount === 0) return;
+  const cx = sumLp0 / ptCount, cy = sumLp1 / ptCount, cz = sumLp2 / ptCount;
+
+  // Second pass: project with rotation around centroid and collect 2D bounds
+  const allPx = [];
+  const allPy = [];
+
+  function collectBounds(trajectories) {
+    if (!trajectories || trajectories.length === 0) return;
+    const dim = trajectories[0].length / ctxLen;
+    for (let b = 0; b < trajectories.length; b++) {
+      const traj = trajectories[b];
+      for (let t = 0; t < ctxLen; t++) {
+        const p = logObsProject(
+          Math.log(Math.max(traj[t * dim], 1e-15)),
+          Math.log(Math.max(traj[t * dim + 1], 1e-15)),
+          Math.log(Math.max(traj[t * dim + 2], 1e-15)),
+          cx, cy, cz,
+        );
+        allPx.push(p.x);
+        allPy.push(p.y);
+      }
+    }
+  }
+
+  if (mixtureMode && mixtureData) {
+    for (let i = 0; i < mixtureData.perComponent.length; i++) {
+      if (!componentVisible[i]) continue;
+      collectBounds(mixtureData.perComponent[i].predictions);
+    }
+  } else {
+    collectBounds(currentData.predictions);
+  }
+
+  if (allPx.length === 0) return;
+
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (let i = 0; i < allPx.length; i++) {
+    if (allPx[i] < minX) minX = allPx[i];
+    if (allPx[i] > maxX) maxX = allPx[i];
+    if (allPy[i] < minY) minY = allPy[i];
+    if (allPy[i] > maxY) maxY = allPy[i];
+  }
+
+  const pad = 24;
+  const rangeX = maxX - minX || 1;
+  const rangeY = maxY - minY || 1;
+  const scale = Math.min((cssW - pad * 2) / rangeX, (cssH - pad * 2) / rangeY);
+  const dataCX = (minX + maxX) / 2;
+  const dataCY = (minY + maxY) / 2;
+
+  function toCanvas(px, py) {
+    return {
+      x: (px - dataCX) * scale + cssW / 2,
+      y: -(py - dataCY) * scale + cssH / 2,
+    };
+  }
+
+  // Draw axis lines from origin (rotated around centroid)
+  const origin = logObsProject(0, 0, 0, cx, cy, cz);
+  const axisLen = 1.5;
+  const axes = [
+    { label: 'log o\u2080', end: logObsProject(-axisLen, 0, 0, cx, cy, cz) },
+    { label: 'log o\u2081', end: logObsProject(0, -axisLen, 0, cx, cy, cz) },
+    { label: 'log o\u2082', end: logObsProject(0, 0, -axisLen, cx, cy, cz) },
+  ];
+
+  const oCanv = toCanvas(origin.x, origin.y);
+  ctx.strokeStyle = border;
+  ctx.lineWidth = 0.5;
+  ctx.font = getFont(9);
+  ctx.fillStyle = textMuted;
+  for (const axis of axes) {
+    const eCanv = toCanvas(axis.end.x, axis.end.y);
+    ctx.beginPath();
+    ctx.moveTo(oCanv.x, oCanv.y);
+    ctx.lineTo(eCanv.x, eCanv.y);
+    ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(axis.label, eCanv.x, eCanv.y - 4);
+  }
+
+  // Draw data points
+  if (mixtureMode && mixtureData) {
+    for (let i = 0; i < mixtureData.perComponent.length; i++) {
+      if (!componentVisible[i]) continue;
+      const pc = mixtureData.perComponent[i];
+      if (!pc.predictions || pc.predictions.length === 0) continue;
+      const dim = pc.predictions[0].length / ctxLen;
+      ctx.fillStyle = componentColor(i);
+      ctx.globalAlpha = Math.max(0.3, activeComponents[i] ? activeComponents[i].weight : 0.5);
+      for (let b = 0; b < pc.predictions.length; b++) {
+        const traj = pc.predictions[b];
+        for (let t = 0; t < ctxLen; t++) {
+          const p = logObsProject(
+            Math.log(Math.max(traj[t * dim], 1e-15)),
+            Math.log(Math.max(traj[t * dim + 1], 1e-15)),
+            Math.log(Math.max(traj[t * dim + 2], 1e-15)),
+            cx, cy, cz,
+          );
+          const c = toCanvas(p.x, p.y);
+          ctx.beginPath();
+          ctx.arc(c.x, c.y, 0.75, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+  } else {
+    const trajectories = currentData.predictions;
+    if (!trajectories || trajectories.length === 0) return;
+    const dim = trajectories[0].length / ctxLen;
+    ctx.fillStyle = accent;
+    for (let b = 0; b < trajectories.length; b++) {
+      const traj = trajectories[b];
+      for (let t = 0; t < ctxLen; t++) {
+        const p = logObsProject(
+          Math.log(Math.max(traj[t * dim], 1e-15)),
+          Math.log(Math.max(traj[t * dim + 1], 1e-15)),
+          Math.log(Math.max(traj[t * dim + 2], 1e-15)),
+          cx, cy, cz,
+        );
+        const c = toCanvas(p.x, p.y);
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, 0.75, 0, Math.PI * 2);
         ctx.fill();
       }
     }

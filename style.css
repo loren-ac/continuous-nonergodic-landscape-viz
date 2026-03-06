@@ -230,6 +230,28 @@ select:focus {
   color: var(--accent);
 }
 
+/* === Select Tooltip === */
+
+.select-tooltip {
+  position: fixed;
+  z-index: 101;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  max-width: 360px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 80ms ease;
+}
+
+.select-tooltip.visible {
+  opacity: 1;
+}
+
 /* === Segmented Buttons === */
 
 .seg-btn {
@@ -682,6 +704,33 @@ option {
 .detail-section canvas {
   display: block;
   width: 100%;
+}
+
+/* === Geometry Container === */
+
+.geometry-container {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.geometry-row {
+  display: flex;
+  gap: 2px;
+}
+
+.geometry-canvas {
+  display: block;
+  flex: 1;
+  min-width: 0;
+}
+
+.geometry-canvas-full {
+  cursor: grab;
+}
+
+.geometry-canvas-full.dragging {
+  cursor: grabbing;
 }
 
 .detail-params {

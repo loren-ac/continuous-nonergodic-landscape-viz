@@ -38,6 +38,7 @@ export function computeDetailData(process, x, a, contextLength = 256, batchSize 
   const optimalLosses = new Float64Array(contextLength);
   const sumSqOptimal = new Float64Array(contextLength);
   const beliefs = [];
+  const predictions = [];
 
   const rng = createRng(seed);
 
@@ -45,6 +46,7 @@ export function computeDetailData(process, x, a, contextLength = 256, batchSize 
     const belief = new Float64Array(S);
     belief.fill(1 / S);
     const seqBeliefs = new Float64Array(contextLength * S);
+    const seqPreds = new Float64Array(contextLength * V);
 
     for (let t = 0; t < contextLength; t++) {
       // Store belief before observation
@@ -55,6 +57,9 @@ export function computeDetailData(process, x, a, contextLength = 256, batchSize 
       for (let o = 0; o < V; o++) {
         for (let s = 0; s < S; s++) pred[o] += belief[s] * emit[o * S + s];
       }
+
+      // Store predictive distribution
+      for (let o = 0; o < V; o++) seqPreds[t * V + o] = pred[o];
 
       // Rao-Blackwellized optimal loss: entropy of predictive distribution
       let entropy = 0;
@@ -89,6 +94,7 @@ export function computeDetailData(process, x, a, contextLength = 256, batchSize 
     }
 
     beliefs.push(seqBeliefs);
+    predictions.push(seqPreds);
   }
 
   // Average losses, optimal losses, and compute stddev across batch
@@ -109,6 +115,7 @@ export function computeDetailData(process, x, a, contextLength = 256, batchSize 
     optimalLosses,
     stdOptimalLosses,
     beliefs,
+    predictions,
     entropyRate: process.entropyRate(x, a),
     randomGuessing: Math.log(V),
   };
