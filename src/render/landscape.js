@@ -183,14 +183,43 @@ export class LandscapeRenderer {
         // Bind mouseup on window in case mouse leaves canvas
         this._windowMouseUp = (ev) => this._onMouseUp(ev);
         window.addEventListener('mouseup', this._windowMouseUp);
+
       }
       if (this._dragState.active) {
         // Raycast to Y=0 plane, update marker position
         const mouse2 = new THREE.Vector2(this.mouse.x, this.mouse.y);
         this.raycaster.setFromCamera(mouse2, this.camera);
         if (this.raycaster.ray.intersectPlane(this._groundPlane, this._dragIntersect)) {
-          const nx = Math.max(0, Math.min(1, this._dragIntersect.x));
-          const na = Math.max(0, Math.min(1, this._dragIntersect.z));
+          let nx = Math.max(0, Math.min(1, this._dragIntersect.x));
+          let na = Math.max(0, Math.min(1, this._dragIntersect.z));
+
+          // Axis-constrained drag: check Shift live so it can be pressed/released mid-drag
+          if (e.shiftKey) {
+            // Record origin when Shift is first pressed during this drag
+            if (this._dragState.originNx === null) {
+              this._dragState.originNx = nx;
+              this._dragState.originNa = na;
+              this._dragState.axis = null;
+            }
+            if (this._dragState.axis === null) {
+              const dnx = Math.abs(nx - this._dragState.originNx);
+              const dna = Math.abs(na - this._dragState.originNa);
+              if (dnx > 0.005 || dna > 0.005) {
+                this._dragState.axis = dnx >= dna ? 'x' : 'a';
+                this.renderer.domElement.style.cursor =
+                  this._dragState.axis === 'x' ? 'ew-resize' : 'ns-resize';
+              }
+            }
+            if (this._dragState.axis === 'x') na = this._dragState.originNa;
+            else if (this._dragState.axis === 'a') nx = this._dragState.originNx;
+          } else if (this._dragState.originNx !== null) {
+            // Shift released — unconstrain
+            this._dragState.originNx = null;
+            this._dragState.originNa = null;
+            this._dragState.axis = null;
+            this.renderer.domElement.style.cursor = 'grabbing';
+          }
+
           if (this._dragState.type === 'selected' && this._selectedMarker) {
             this._selectedMarker.position.set(nx, 0.003, na);
           } else if (this._dragState.type === 'component') {
@@ -394,6 +423,9 @@ export class LandscapeRenderer {
           index: hit.index,
           startMouse: { x: e.clientX, y: e.clientY },
           active: false,
+          axis: null,
+          originNx: null,
+          originNa: null,
         };
       }
     }
@@ -414,8 +446,13 @@ export class LandscapeRenderer {
       const mouse2 = new THREE.Vector2(this.mouse.x, this.mouse.y);
       this.raycaster.setFromCamera(mouse2, this.camera);
       if (this.raycaster.ray.intersectPlane(this._groundPlane, this._dragIntersect) && this.onDragEnd && this.gridData) {
-        const nx = Math.max(0, Math.min(1, this._dragIntersect.x));
-        const na = Math.max(0, Math.min(1, this._dragIntersect.z));
+        let nx = Math.max(0, Math.min(1, this._dragIntersect.x));
+        let na = Math.max(0, Math.min(1, this._dragIntersect.z));
+        // Apply axis constraint to final position
+        if (e.shiftKey && this._dragState.originNx !== null) {
+          if (this._dragState.axis === 'x') na = this._dragState.originNa;
+          else if (this._dragState.axis === 'a') nx = this._dragState.originNx;
+        }
         const [p0, p1] = [this.gridData.process.params[0], this.gridData.process.params[1]];
         const x = p0.min + nx * (p0.max - p0.min);
         const a = p1.min + na * (p1.max - p1.min);

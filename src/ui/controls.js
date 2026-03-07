@@ -201,6 +201,7 @@ export function initControls(callbacks) {
     <div class="help-row"><span class="help-key">Cmd + Click</span><span class="help-desc">New mix tab</span></div>
     <div class="help-divider"></div>
     <div class="help-row"><span class="help-key">Option + Drag</span><span class="help-desc">Move marker</span></div>
+    <div class="help-row"><span class="help-key">Opt + Shift + Drag</span><span class="help-desc">Constrain to axis</span></div>
     <div class="help-row"><span class="help-key">Double-click value</span><span class="help-desc">Type exact coordinate</span></div>
   `;
 
