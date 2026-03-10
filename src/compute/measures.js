@@ -160,6 +160,76 @@ measures.set('fisherRao', {
   },
 });
 
+// Eigenvalues of a 3×3 real matrix via characteristic polynomial (trigonometric method)
+// Returns array of 3 eigenvalues sorted by descending magnitude.
+function eigenvalues3x3(m) {
+  const [a, b, c, d, e, f, g, h, k] = m;
+  // Characteristic polynomial: λ³ - pλ² + qλ - r = 0
+  const p = a + e + k;
+  const q = a * e - b * d + a * k - c * g + e * k - f * h;
+  const r = a * (e * k - f * h) - b * (d * k - f * g) + c * (d * h - e * g);
+
+  // Depressed cubic: t³ + At + B = 0 where t = λ - p/3
+  const p3 = p / 3;
+  const A = (3 * q - p * p) / 3;
+  const B = (2 * p * p * p - 9 * p * q + 27 * r) / 27;
+  const disc = B * B / 4 + A * A * A / 27;
+
+  let roots;
+  if (disc > 1e-12) {
+    // One real root, two complex conjugate
+    const sqrtDisc = Math.sqrt(disc);
+    const u = Math.cbrt(-B / 2 + sqrtDisc);
+    const v = Math.cbrt(-B / 2 - sqrtDisc);
+    const real1 = u + v + p3;
+    const realPart = -(u + v) / 2 + p3;
+    const imagPart = (u - v) * Math.sqrt(3) / 2;
+    const mag = Math.sqrt(realPart * realPart + imagPart * imagPart);
+    roots = [real1, mag, mag]; // complex pair → return magnitudes
+  } else {
+    // Three real roots (trigonometric solution)
+    const mA3 = Math.sqrt(Math.max(0, -A / 3));
+    const phi = Math.acos(Math.max(-1, Math.min(1, -B / 2 / Math.max(1e-30, mA3 * mA3 * mA3))));
+    roots = [
+      2 * mA3 * Math.cos(phi / 3) + p3,
+      2 * mA3 * Math.cos((phi + 2 * Math.PI) / 3) + p3,
+      2 * mA3 * Math.cos((phi + 4 * Math.PI) / 3) + p3,
+    ];
+  }
+
+  roots.sort((x, y) => Math.abs(y) - Math.abs(x));
+  return roots;
+}
+
+measures.set('secondEigenvalue', {
+  name: 'secondEigenvalue',
+  label: 'Second Eigenvalue',
+  shortLabel: '\u03BB\u2082',
+  unit: '',
+  tooltip: '\u03BB\u2082 of M[s,s\u2032] = \u03A3\u2092 T[o][s][s\u2032]\nSecond-largest eigenvalue of the marginal\nstate transition matrix.',
+  isExpensive: false,
+  needsReference: false,
+  extraParams: [],
+  compute(process, paramValues) {
+    const S = process.numStates;
+    const V = process.vocabSize;
+    const tm = process.transitionMatrix(paramValues[0], paramValues[1]);
+
+    // Build marginal state transition matrix M[s][s'] = Σ_o T[o][s][s']
+    const M = new Float64Array(S * S);
+    for (let s = 0; s < S; s++) {
+      for (let sp = 0; sp < S; sp++) {
+        let sum = 0;
+        for (let o = 0; o < V; o++) sum += tm[o * S * S + s * S + sp];
+        M[s * S + sp] = sum;
+      }
+    }
+
+    const roots = eigenvalues3x3(Array.from(M));
+    return roots[1]; // second-largest by magnitude
+  },
+});
+
 // --- Expensive (Web Worker) measures ---
 
 measures.set('optimalLoss', {
