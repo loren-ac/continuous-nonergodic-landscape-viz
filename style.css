@@ -733,6 +733,46 @@ option {
   cursor: grabbing;
 }
 
+.export-code-wrap {
+  position: relative;
+  margin: 0 12px 6px;
+}
+
+.export-code {
+  background: var(--bg2);
+  font-family: var(--font);
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 8px;
+  margin: 0;
+  border-radius: 3px;
+  white-space: pre;
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: 200px;
+  color: var(--fg);
+}
+
+.export-copy-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: transparent;
+  border: 1px solid var(--muted);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: var(--font);
+  line-height: 1;
+}
+
+.export-copy-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .detail-params {
   display: flex;
   gap: 2px;

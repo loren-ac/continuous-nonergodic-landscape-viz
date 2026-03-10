@@ -16,6 +16,7 @@ let lossCanvas = null;
 let lossCtx = null;
 
 let geometryToggles = { belief: true, obs: false, logObs: false };
+let exportMode = 'nonergodic'; // 'nonergodic' | 'sweep'
 let logObsAngle = 0;
 let logObsDragState = null;
 
@@ -102,6 +103,19 @@ export function createPanel() {
         </span>
       </div>
       <div class="geometry-container" id="geometry-container"></div>
+    </div>
+    <div class="detail-section" id="export-section">
+      <div class="detail-section-label">
+        Export
+        <span class="detail-chart-controls" id="export-mode-toggle" style="display:none;">
+          <button class="seg-btn active" data-export="nonergodic">Nonergodic</button>
+          <button class="seg-btn" data-export="sweep">Sweep</button>
+        </span>
+      </div>
+      <div class="export-code-wrap">
+        <pre class="export-code" id="export-code"></pre>
+        <button class="export-copy-btn" id="export-copy" title="Copy to clipboard">&#x2398;</button>
+      </div>
     </div>
     <div class="detail-section detail-params">
       <div class="param-cell" id="detail-ctx" data-min="16" data-max="512" data-step="16" data-value="256">
@@ -218,6 +232,27 @@ export function createPanel() {
     renderAllGeometry();
   });
 
+  // Export mode toggle (Nonergodic / Sweep)
+  const exportToggle = document.getElementById('export-mode-toggle');
+  exportToggle.addEventListener('click', (e) => {
+    const btn = e.target.closest('.seg-btn[data-export]');
+    if (!btn) return;
+    exportMode = btn.dataset.export;
+    exportToggle.querySelectorAll('.seg-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.export === exportMode)
+    );
+    updateExport();
+  });
+
+  // Export copy button
+  document.getElementById('export-copy').addEventListener('click', () => {
+    const code = document.getElementById('export-code').textContent;
+    navigator.clipboard.writeText(code);
+    const btn = document.getElementById('export-copy');
+    btn.textContent = '\u2713';
+    setTimeout(() => { btn.textContent = '\u2398'; }, 1200);
+  });
+
   // Param cells — wire through tabState
   initParamCell(document.getElementById('detail-ctx'), (v) => {
     tabState.setPanelParam('contextLength', Math.round(v));
@@ -243,6 +278,7 @@ export function createPanel() {
       }
       recomputeActiveTab();
       renderTabBar();
+      updateExport();
     } else if (reason === 'param-change') {
       recomputeActiveTab();
     } else if (reason === 'visibility-change') {
@@ -323,6 +359,7 @@ function loadActiveTab() {
     document.getElementById('detail-a').textContent = tab.point.a.toFixed(4);
     document.getElementById('detail-component-list').style.display = 'none';
     document.getElementById('detail-view-toggle').style.display = 'none';
+    document.getElementById('export-mode-toggle').style.display = 'none';
 
     const cached = tabState.getCachedData(tab.id);
     if (cached) {
@@ -345,6 +382,7 @@ function loadActiveTab() {
     document.getElementById('detail-coords-bar').style.display = 'none';
     document.getElementById('detail-component-list').style.display = '';
     document.getElementById('detail-view-toggle').style.display = '';
+    document.getElementById('export-mode-toggle').style.display = '';
 
     const viewToggleEl = document.getElementById('detail-view-toggle');
     viewToggleEl.querySelectorAll('.seg-btn').forEach(
@@ -366,6 +404,7 @@ function loadActiveTab() {
     }
   }
 
+  updateExport();
   ensurePanelOpen();
 }
 
@@ -377,6 +416,102 @@ function ensurePanelOpen() {
     document.getElementById('canvas-container').classList.add('panel-open');
     isOpen = true;
   }
+}
+
+// --- Export YAML ---
+
+function updateExport() {
+  const tab = tabState.getActiveTab();
+  const codeEl = document.getElementById('export-code');
+  if (!tab) { codeEl.textContent = ''; return; }
+
+  const pName = tabState.getProcessName();
+  const process = getProcess(pName);
+  const paramNames = process.params.map(p => p.name);
+
+  if (tab.type === 'explore') {
+    codeEl.textContent = generateErgodicYaml(pName, paramNames, tab.point);
+  } else if (tab.type === 'compound') {
+    if (exportMode === 'nonergodic') {
+      codeEl.textContent = generateNonergodicYaml(pName, paramNames, tab.components);
+    } else {
+      codeEl.textContent = generateSweepYaml(pName, paramNames, tab.components);
+    }
+  }
+}
+
+function generateErgodicYaml(processName, paramNames, point) {
+  const vals = [point.x, point.a];
+  const paramsBlock = paramNames.map((n, i) =>
+    `    ${n}: ${vals[i]}`
+  ).join('\n');
+  return `name: ${processName}
+instance:
+  _target_: simplexity.generative_processes.builder.build_hidden_markov_model
+  process_name: ${processName}
+  process_params:
+${paramsBlock}
+  device: \${device}
+
+base_vocab_size: ???
+bos_token: ???
+eos_token: null
+vocab_size: ???`;
+}
+
+function generateNonergodicYaml(processName, paramNames, components) {
+  const comps = components.map(c => {
+    const vals = [c.x, c.a];
+    const paramsBlock = paramNames.map((n, i) =>
+      `        ${n}: ${vals[i]}`
+    ).join('\n');
+    return `    - component_type: hmm
+      process_name: ${processName}
+      process_params:
+${paramsBlock}`;
+  }).join('\n');
+
+  const weights = components.map(c => +c.weight.toFixed(4));
+  return `instance:
+  _target_: simplexity.generative_processes.builder.build_nonergodic_process_from_spec
+  components:
+${comps}
+  component_weights: [${weights.join(', ')}]
+  vocab_maps: null`;
+}
+
+function generateSweepYaml(processName, paramNames, components) {
+  const first = components[0];
+  const firstVals = [first.x, first.a];
+  const baseParams = paramNames.map((n, i) =>
+    `    ${n}: ${firstVals[i]}`
+  ).join('\n');
+
+  const base = `name: ${processName}
+instance:
+  _target_: simplexity.generative_processes.builder.build_hidden_markov_model
+  process_name: ${processName}
+  process_params:
+${baseParams}
+  device: \${device}
+
+base_vocab_size: ???
+bos_token: ???
+eos_token: null
+vocab_size: ???`;
+
+  const sweepLines = paramNames.map((n, pi) => {
+    const vals = components.map(c => pi === 0 ? c.x : c.a);
+    const items = vals.map(v => `  - ${v}`).join('\n');
+    return `generative_process.instance.process_params.${n}:\n${items}`;
+  }).join('\n');
+
+  return `# --- generative_process config (e.g. configs/generative_process/${processName}.yaml) ---
+${base}
+
+# --- sweep config (e.g. sweeps/process_params.yaml) ---
+# simplexity-multirun run.py -c config --sweep-file sweeps/process_params.yaml
+${sweepLines}`;
 }
 
 // --- Recompute ---
