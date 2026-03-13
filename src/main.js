@@ -8,6 +8,7 @@ import * as hud from './ui/hud.js';
 import * as tooltip from './render/tooltip.js';
 import { createPanel, hidePanel, isPanelOpen } from './render/detail-panel.js';
 import * as tabState from './state/tab-state.js';
+import { computeMeasureVoronoi } from './compute/voronoi.js';
 
 // State
 let state = { ...defaults };
@@ -15,8 +16,9 @@ let renderer;
 let currentAbort = null;
 let paramsDirty = false;
 let isRunning = false;
-let shiftHeld = false;
-let metaHeld = false;
+
+let lastGridData = null; // cached for Voronoi recompute on tab changes
+let voronoiEnabled = false;
 
 const refPrompt = document.getElementById('ref-prompt');
 
@@ -188,6 +190,9 @@ async function recompute() {
         renderer.setVarianceSurfaces(gridData);
       }
 
+      lastGridData = gridData;
+      updateVoronoi();
+
       hud.updatePoints(gridData.N);
       hud.updateRange(gridData.vMin, gridData.vMax, measure.unit);
       hud.updateCompute(elapsed);
@@ -211,9 +216,31 @@ async function recompute() {
     renderer.updateHeight(state.heightEnabled, state.heightScale);
     renderer.updatePointSize(state.pointSize);
 
+    lastGridData = gridData;
+    updateVoronoi();
+
     hud.updatePoints(gridData.N);
     hud.updateRange(gridData.vMin, gridData.vMax, measure.unit);
     hud.updateCompute(elapsed);
+  }
+}
+
+function updateVoronoi() {
+  if (!voronoiEnabled || !lastGridData) {
+    renderer.clearVoronoiOverlay();
+    renderer.clearVoronoiTint();
+    return;
+  }
+  const active = tabState.getActiveTab();
+  if (active?.type === 'compound' && active.components.length >= 2) {
+    const { assignments, edges, edgeColors } = computeMeasureVoronoi(
+      lastGridData, active.components, state.heightEnabled, state.heightScale
+    );
+    renderer.setVoronoiOverlay(edges, edgeColors);
+    renderer.applyVoronoiTint(assignments, active.components.length);
+  } else {
+    renderer.clearVoronoiOverlay();
+    renderer.clearVoronoiTint();
   }
 }
 
@@ -320,10 +347,12 @@ function init() {
     onHeightToggle(enabled) {
       state.heightEnabled = enabled;
       renderer.updateHeight(enabled, state.heightScale);
+      updateVoronoi();
     },
     onHeightScaleChange(scale) {
       state.heightScale = scale;
       renderer.updateHeight(state.heightEnabled, scale);
+      updateVoronoi();
     },
     onPointSizeChange(size) {
       state.pointSize = size;
@@ -354,6 +383,10 @@ function init() {
     onVarianceToggle(enabled) {
       renderer.toggleVariance(enabled);
     },
+    onVoronoiToggle(enabled) {
+      voronoiEnabled = enabled;
+      updateVoronoi();
+    },
   });
 
   // Keep landscape markers in sync with tab state
@@ -369,20 +402,11 @@ function init() {
     } else if (active.type === 'compound' && active.components.length > 0) {
       renderer.setComponentMarkers(active.components);
     }
-  });
-
-  // Key tracking
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Shift') shiftHeld = true;
-    if (e.key === 'Meta') metaHeld = true;
-  });
-  window.addEventListener('keyup', (e) => {
-    if (e.key === 'Shift') shiftHeld = false;
-    if (e.key === 'Meta') metaHeld = false;
+    updateVoronoi();
   });
 
   // Click on landscape
-  renderer.onClick = (idx, x, a, value) => {
+  renderer.onClick = (idx, x, a, value, mods) => {
     const process = getProcess(state.process);
     const p0 = process.params[0];
     const p1 = process.params[1];
@@ -390,10 +414,10 @@ function init() {
     const na = (a - p1.min) / (p1.max - p1.min);
     const point = { x, a, nx, na };
 
-    if (metaHeld) {
+    if (mods.meta) {
       // Cmd+Click: new compound tab
       tabState.createCompoundTab(point);
-    } else if (shiftHeld) {
+    } else if (mods.shift) {
       // Shift+Click: add/remove from active compound (or create one)
       const active = tabState.getActiveTab();
       if (active && active.type === 'compound') {

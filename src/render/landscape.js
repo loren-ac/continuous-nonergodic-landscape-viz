@@ -5,6 +5,15 @@ import { presets, animateToPreset } from './camera-presets.js';
 import { componentColorHex } from './component-colors.js';
 import * as tooltip from './tooltip.js';
 
+// Voronoi tint colors as [r, g, b] in [0,1] — matches COMPONENT_COLORS
+const VORONOI_TINT_COLORS = [
+  [0.91, 0.66, 0.30], // #e8a84c
+  [0.30, 0.55, 0.91], // #4c8ce8
+  [0.30, 0.91, 0.48], // #4ce87a
+  [0.91, 0.30, 0.55], // #e84c8c
+  [0.55, 0.30, 0.91], // #8c4ce8
+];
+
 export class LandscapeRenderer {
   constructor(container) {
     this.container = container;
@@ -23,6 +32,7 @@ export class LandscapeRenderer {
     this._upperSurface = null;
     this._lowerSurface = null;
     this._varianceEnabled = false;
+    this._voronoiLines = null;
     this.isMuted = false;
 
     // Drag state
@@ -291,6 +301,7 @@ export class LandscapeRenderer {
     this.gridData = gridData;
     this.colorName = colorName || this.colorName;
     this.isMuted = false;
+    this._savedColors = null;
 
     // Remove old points and variance surfaces
     if (this.points) {
@@ -341,6 +352,7 @@ export class LandscapeRenderer {
   updateColors(colorName) {
     if (!this.gridData || !this.points) return;
     this.colorName = colorName;
+    this._savedColors = null;
     const { values, vMin, vMax } = this.gridData;
     const colors = this.points.geometry.attributes.color.array;
     mapColors(colorName, values, vMin, vMax, colors);
@@ -493,7 +505,7 @@ export class LandscapeRenderer {
     if (intersects.length > 0) {
       const idx = intersects[0].index;
       const { params, values } = this.gridData;
-      if (this.onClick) this.onClick(idx, params[idx * 2], params[idx * 2 + 1], values[idx]);
+      if (this.onClick) this.onClick(idx, params[idx * 2], params[idx * 2 + 1], values[idx], { shift: e.shiftKey, meta: e.metaKey });
     } else if (this.onClickEmpty) {
       this.onClickEmpty();
     }
@@ -672,6 +684,70 @@ export class LandscapeRenderer {
     if (this._upperSurface) this._upperSurface.visible = show;
     if (this._lowerSurface) this._lowerSurface.visible = show;
     this.dirty = true;
+  }
+
+  // Voronoi overlay: line segments at cell boundaries
+  setVoronoiOverlay(edges, edgeColors) {
+    this.clearVoronoiOverlay();
+    if (!edges || edges.length === 0) return;
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(edges, 3));
+
+    const material = new THREE.LineBasicMaterial({
+      color: 0x000000,
+      depthWrite: false,
+    });
+
+    this._voronoiLines = new THREE.LineSegments(geometry, material);
+    this._voronoiLines.renderOrder = 600;
+    this.scene.add(this._voronoiLines);
+    this.dirty = true;
+  }
+
+  clearVoronoiOverlay() {
+    if (this._voronoiLines) {
+      this.scene.remove(this._voronoiLines);
+      this._voronoiLines.geometry.dispose();
+      this._voronoiLines.material.dispose();
+      this._voronoiLines = null;
+      this.dirty = true;
+    }
+  }
+
+  // Tint point cloud by Voronoi cell membership
+  applyVoronoiTint(assignments, numComponents) {
+    if (!this.points || !this.gridData) return;
+    this._savedColors = this._savedColors || null;
+
+    const colors = this.points.geometry.attributes.color.array;
+    const N = colors.length / 3;
+
+    // Save original colors on first tint
+    if (!this._savedColors) {
+      this._savedColors = new Float32Array(colors);
+    }
+
+    const blend = 0.3; // tint strength
+    for (let i = 0; i < N; i++) {
+      const k = assignments[i];
+      const cc = VORONOI_TINT_COLORS[k % VORONOI_TINT_COLORS.length];
+      colors[i * 3] = this._savedColors[i * 3] * (1 - blend) + cc[0] * blend;
+      colors[i * 3 + 1] = this._savedColors[i * 3 + 1] * (1 - blend) + cc[1] * blend;
+      colors[i * 3 + 2] = this._savedColors[i * 3 + 2] * (1 - blend) + cc[2] * blend;
+    }
+    this.points.geometry.attributes.color.needsUpdate = true;
+    this.dirty = true;
+  }
+
+  clearVoronoiTint() {
+    if (this._savedColors && this.points) {
+      const colors = this.points.geometry.attributes.color.array;
+      colors.set(this._savedColors);
+      this.points.geometry.attributes.color.needsUpdate = true;
+      this._savedColors = null;
+      this.dirty = true;
+    }
   }
 
   // Public resize (called after panel open/close transition)

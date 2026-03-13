@@ -108,6 +108,7 @@ export function initControls(callbacks) {
     onMeasureParamChange,
     onReferenceClear,
     onVarianceToggle,
+    onVoronoiToggle,
   } = callbacks;
 
   // Measure select (custom dropdown)
@@ -174,6 +175,15 @@ export function initControls(callbacks) {
     varOn = !varOn;
     varBtn.classList.toggle('active', varOn);
     if (onVarianceToggle) onVarianceToggle(varOn);
+  });
+
+  // Voronoi toggle
+  const voronoiBtn = document.getElementById('voronoi-toggle');
+  let voronoiOn = false;
+  voronoiBtn.addEventListener('click', () => {
+    voronoiOn = !voronoiOn;
+    voronoiBtn.classList.toggle('active', voronoiOn);
+    if (onVoronoiToggle) onVoronoiToggle(voronoiOn);
   });
 
   // Theme toggle
