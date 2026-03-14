@@ -172,7 +172,7 @@ function eigenvalues3x3(m) {
   // Depressed cubic: t³ + At + B = 0 where t = λ - p/3
   const p3 = p / 3;
   const A = (3 * q - p * p) / 3;
-  const B = (2 * p * p * p - 9 * p * q + 27 * r) / 27;
+  const B = (-2 * p * p * p + 9 * p * q - 27 * r) / 27;
   const disc = B * B / 4 + A * A * A / 27;
 
   let roots;
